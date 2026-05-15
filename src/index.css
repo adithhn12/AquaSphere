@@ -1,0 +1,209 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── GLOBAL LIGHT THEME PALETTE ─────────────────────── */
+  --color-bg-primary: #F1F5F9;
+  --color-bg-secondary: #FFFFFF;
+  --color-bg-card: #FFFFFF;
+  --color-bg-card-hover: #F8FAFC;
+  --color-border-dim: #E2E8F0;
+  --color-border-glow: #38BDF833;
+
+  /* ── Accents (unchanged) ────────────────────────────── */
+  --color-cyan: #0EA5E9;
+  --color-cyan-dim: #0EA5E988;
+  --color-neon: #10B981;
+  --color-neon-dim: #10B98166;
+  --color-amber: #F59E0B;
+  --color-amber-dim: #F59E0B66;
+  --color-red: #EF4444;
+  --color-red-dim: #EF444466;
+
+  /* ── Text (dark-on-light for readability) ───────────── */
+  --color-text-primary: #1E293B;
+  --color-text-secondary: #64748B;
+  --color-text-dim: #94A3B8;
+
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+  --font-sans: 'Inter', system-ui, sans-serif;
+}
+
+/* ── Scrollbar (light) ──────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #CBD5E1 #F1F5F9;
+}
+*::-webkit-scrollbar { width: 5px; }
+*::-webkit-scrollbar-track { background: #F1F5F9; }
+*::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 99px; }
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #F1F5F9;
+  color: #1E293B;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Animations ─────────────────────────────────────── */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+@keyframes pulse-ring {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+@keyframes data-flicker {
+  0%, 100% { opacity: 1; }
+  93% { opacity: 1; }
+  94% { opacity: 0.85; }
+  95% { opacity: 1; }
+}
+@keyframes ripple {
+  0% { transform: scale(0.8); opacity: 0.7; }
+  100% { transform: scale(3); opacity: 0; }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+.animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
+.animate-pulse-ring { animation: pulse-ring 2s ease-out infinite; }
+.animate-data-flicker { animation: data-flicker 6s ease-in-out infinite; }
+.animate-float { animation: float 3s ease-in-out infinite; }
+
+/* ── Soft shadows for light theme ───────────────────── */
+.glow-cyan  { box-shadow: 0 2px 12px rgba(14, 165, 233, 0.12); }
+.glow-neon  { box-shadow: 0 2px 12px rgba(16, 185, 129, 0.12); }
+.glow-red   { box-shadow: 0 2px 12px rgba(239, 68, 68, 0.12); }
+.glow-amber { box-shadow: 0 2px 12px rgba(245, 158, 11, 0.12); }
+
+.text-glow-cyan { text-shadow: none; }
+.text-glow-neon { text-shadow: none; }
+.text-glow-red  { text-shadow: none; }
+
+.border-glow-cyan { border-color: #0EA5E933; box-shadow: 0 1px 6px #0EA5E918; }
+
+.bg-grid-pattern {
+  background-image: none;
+}
+
+/* ── Leaflet Base (light by default) ────────────────── */
+.leaflet-container {
+  background: #F1F5F9 !important;
+  font-family: 'Inter', system-ui, sans-serif !important;
+}
+.leaflet-tile-pane {
+  filter: none;
+}
+.leaflet-control-zoom { display: none !important; }
+.leaflet-control-attribution { display: none !important; }
+
+.leaflet-popup-content-wrapper {
+  background: #FFFFFF !important;
+  color: #1E293B !important;
+  border: 1px solid #E2E8F0 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08) !important;
+  font-family: 'Inter', system-ui, sans-serif !important;
+  font-size: 13px !important;
+  padding: 4px !important;
+}
+.leaflet-popup-tip {
+  background: #FFFFFF !important;
+  border: 1px solid #E2E8F0 !important;
+}
+.leaflet-popup-close-button {
+  color: #94A3B8 !important;
+}
+
+.leaflet-ward-label,
+.leaflet-tooltip {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+.leaflet-ward-label::before,
+.leaflet-tooltip::before {
+  display: none !important;
+}
+
+/* ── Light map (default now) ────────────────────────── */
+.light-map .leaflet-tile-pane { filter: none !important; }
+.light-map .leaflet-popup-content-wrapper {
+  background: #FFFFFF !important;
+  color: #1E293B !important;
+  border: 1px solid #E2E8F0 !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08) !important;
+}
+.light-map .leaflet-popup-tip {
+  background: #FFFFFF !important;
+  border: 1px solid #E2E8F0 !important;
+}
+
+/* ── Dark map (if toggled) ──────────────────────────── */
+.dark-map .leaflet-tile-pane {
+  filter: brightness(0.7) contrast(1.1) saturate(0.4) !important;
+}
+.dark-map .leaflet-popup-content-wrapper {
+  background: #1E293B !important;
+  color: #F1F5F9 !important;
+  border: 1px solid #334155 !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
+}
+.dark-map .leaflet-popup-tip {
+  background: #1E293B !important;
+  border: 1px solid #334155 !important;
+}
+
+/* ── Recharts (light) ───────────────────────────────── */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: #E2E8F0 !important;
+}
+.recharts-text {
+  font-family: 'Inter', system-ui, sans-serif !important;
+  font-size: 11px !important;
+  fill: #94A3B8 !important;
+}
+
+.incident-scroll {
+  mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+}
+
+/* ── Leak water-drop on map ─────────────────────────── */
+@keyframes leak-drop-pulse {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 2px 6px rgba(14, 165, 233, 0.35));
+  }
+  50% {
+    transform: scale(1.18);
+    filter: drop-shadow(0 4px 16px rgba(14, 165, 233, 0.55));
+  }
+}
+
+.leak-ripple {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(14, 165, 233, 0.12);
+  animation: ripple 2s ease-out infinite;
+}
+.leak-ripple:nth-child(2) { animation-delay: 0.65s; }
+.leak-ripple:nth-child(3) { animation-delay: 1.3s; }
+
+.leak-drop-icon {
+  animation: leak-drop-pulse 2s ease-in-out infinite;
+}
+
+/* ── Smooth tanker CSS transition (matches 3s interval) ── */
+.leaflet-marker-icon {
+  transition: transform 2.8s linear !important;
+}
