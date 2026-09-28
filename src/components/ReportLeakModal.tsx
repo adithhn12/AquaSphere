@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Droplets, MapPin, Camera, CheckCircle } from 'lucide-react';
 
@@ -17,12 +17,20 @@ interface Props {
     severity: 'low' | 'medium' | 'high';
     imageUrl: string | null;
   }) => void;
+  user?: any;
 }
 
-export default function ReportLeakModal({ isOpen, onClose, onSubmitLeak }: Props) {
-  const [ward, setWard] = useState('');
+export default function ReportLeakModal({ isOpen, onClose, onSubmitLeak, user }: Props) {
+  const [ward, setWard] = useState(user?.ward || '');
   const [description, setDescription] = useState('');
   const [severity, setSeverity] = useState<'low' | 'medium' | 'high'>('medium');
+
+  useEffect(() => {
+    if (user && isOpen) {
+      setWard(user.ward || '');
+    }
+  }, [user, isOpen]);
+
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);

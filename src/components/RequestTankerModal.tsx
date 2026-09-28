@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Truck, MapPin, Droplets, AlertTriangle, CheckCircle, IndianRupee } from 'lucide-react';
 import { calculateTankerBill, CAPACITY_OPTIONS, type TankerCapacity } from '../utils/pricing';
@@ -14,6 +14,7 @@ interface Props {
     billAmount: number;
   }) => void;
   userRR?: string;
+  user?: any;
 }
 
 // Simulated delivery distance from BWSSB pumping station (km)
@@ -35,14 +36,23 @@ const SIMULATED_DISTANCES: Record<string, number> = {
 
 const WARD_OPTIONS = Object.keys(SIMULATED_DISTANCES);
 
-export default function RequestTankerModal({ isOpen, onClose, onSubmitRequest, userRR }: Props) {
-  const [name, setName] = useState('');
-  const [ward, setWard] = useState('');
-  const [address, setAddress] = useState('');
+export default function RequestTankerModal({ isOpen, onClose, onSubmitRequest, userRR, user }: Props) {
+  const [name, setName] = useState(user?.name || '');
+  const [ward, setWard] = useState(user?.ward || '');
+  const [address, setAddress] = useState(user?.address || '');
   const [capacity, setCapacity] = useState<TankerCapacity>(5000);
   const [urgency, setUrgency] = useState<'low' | 'normal' | 'high' | 'critical'>('normal');
   const [submitted, setSubmitted] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+
+  // Update fields if user data is loaded/changed
+  useEffect(() => {
+    if (user && isOpen) {
+      setName(user.name || '');
+      setWard(user.ward || '');
+      setAddress(user.address || '');
+    }
+  }, [user, isOpen]);
 
   // Live pricing calculation
   const distanceKm = SIMULATED_DISTANCES[ward] || 3.0;

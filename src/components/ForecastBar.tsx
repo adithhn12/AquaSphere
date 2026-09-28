@@ -12,14 +12,14 @@ interface ForecastBarProps {
 export default function ForecastBar({ wardId, wardName, probability, demandChange, status, index }: ForecastBarProps) {
   const barColor = status === 'critical' ? 'bg-red' : status === 'risk' ? 'bg-amber' : 'bg-neon';
   const textColor = status === 'critical' ? 'text-red' : status === 'risk' ? 'text-amber' : 'text-neon';
-  const trackColor = 'bg-[#F1F5F9]';
+  const trackColor = 'bg-bg-primary';
 
   return (
     <motion.div
       initial={{ opacity: 0, x: 15 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.08, duration: 0.35 }}
-      className="p-3 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] mb-2.5 last:mb-0"
+      className="p-3 rounded-xl bg-bg-primary border border-border-dim mb-2.5 last:mb-0"
     >
       <div className="flex items-center justify-between mb-2.5">
         <div className="flex items-center gap-2">

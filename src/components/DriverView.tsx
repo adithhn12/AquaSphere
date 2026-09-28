@@ -1,14 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Truck, MapPin, Navigation, Phone, Droplets, CheckCircle, DollarSign, Route, ChevronRight, Star, Package, AlertTriangle, Radio, Bell, Users, Shield } from 'lucide-react';
 import { MapContainer, TileLayer, Polyline, CircleMarker, useMap } from 'react-leaflet';
-import { tankers } from '../data/mockData';
+import { useFirestore } from '../hooks/useFirestore';
+import { db } from '../firebase';
+import { doc, updateDoc } from 'firebase/firestore';
 import MapZoomControls from './MapZoomControls';
 
 function MapContent({ center }: { center: [number, number] }) {
   const map = useMap();
   useEffect(() => {
-    map.setView(center, 14);
+    if (center && typeof center[0] === 'number' && typeof center[1] === 'number') {
+      map.setView(center, 14);
+    }
   }, [map, center]);
   return null;
 }
@@ -25,53 +29,91 @@ interface PeerAlert {
   distance: string;
 }
 
-export default function DriverView() {
+interface DriverViewProps {
+  user?: any;
+}
+
+export default function DriverView({ user }: DriverViewProps) {
+  const { data: tankers } = useFirestore<any>('tankers');
+  const { data: requests } = useFirestore<any>('requests');
+  const { data: dbAlerts } = useFirestore<PeerAlert>('peer_alerts');
+  
+  const userName = user?.name || 'Pilot';
+  
+  // In a real app, we'd get this from the user session
   const [activeTab, setActiveTab] = useState<'deliveries' | 'route' | 'earnings' | 'alerts'>('deliveries');
-  const [currentTanker] = useState(tankers[0]);
-  const [currentDeliveryIndex, setCurrentDeliveryIndex] = useState(0);
+  
+  // Find the tanker assigned to this driver (mocking for demo)
+  const currentTanker = tankers.find(t => t.id === user?.tankerId || t.driver === userName) 
+    || tankers.find(t => t.id === 'TNK-218')
+    || tankers[0] 
+    || { 
+      lat: 12.9116, 
+      lng: 77.6389, 
+      id: user?.tankerId || 'TNK-ACTIVE', 
+      plate: 'KA-01-AQ-2026', 
+      filled: 8500, 
+      capacity: 10000, 
+      route: [[12.9716, 77.5946], [12.9116, 77.6389]],
+      driver: userName
+    };
+  
+  // Use real requests from Firestore, filtered by assignment
+  const deliveries = useMemo(() => {
+    const relevant = requests.filter((r: any) => 
+      (r.status === 'Dispatched' || r.status === 'Delivered') && 
+      r.assignedTankers?.includes(currentTanker.id)
+    );
+    
+    const formatted = relevant.map((r: any) => ({
+      id: r.id,
+      address: r.area,
+      liters: r.liters,
+      status: r.status === 'Dispatched' ? 'current' : 'completed',
+      customer: r.name,
+      phone: '+91 98765 43210',
+      urgency: r.urgency
+    }));
+    
+    return formatted.sort((a, b) => {
+      const order: Record<string, number> = { current: 0, completed: 1 };
+      return order[a.status] - order[b.status];
+    });
+  }, [requests, currentTanker.id]);
+
+  const currentDelivery = deliveries.find(d => d.status === 'current');
   const [eta, setEta] = useState(24);
   const [showSOS, setShowSOS] = useState(false);
   const [sosActive, setSosActive] = useState(false);
   const [sosCountdown, setSosCountdown] = useState(5);
-  const [peerAlerts, setPeerAlerts] = useState<PeerAlert[]>([
-    {
-      id: 'ALERT-001',
-      driverId: 'DRV-2026-445',
-      driverName: 'Suresh M.',
-      type: 'mechanical',
-      message: 'Engine failure on ORR near Silk Board. Need backup tanker for 8000L delivery.',
-      location: 'Silk Board Junction',
-      coordinates: [12.9177, 77.6238],
-      time: '2 min ago',
-      distance: '3.2 km away',
-    },
-    {
-      id: 'ALERT-002',
-      driverId: 'DRV-2026-312',
-      driverName: 'Ramesh K.',
-      type: 'hazard',
-      message: 'Road flooded near Varthur Lake. Avoid Varthur Main Road, take alternate route via Whitefield.',
-      location: 'Varthur Main Road',
-      coordinates: [12.9437, 77.7400],
-      time: '15 min ago',
-      distance: '5.8 km away',
-    },
-  ]);
+  const [selectedEmergencyType, setSelectedEmergencyType] = useState<'stranded' | 'mechanical' | 'hazard'>('stranded');
 
-  const deliveries = [
-    { id: 'DEL-001', address: 'HSR Layout Sector 2, 14th Main', liters: 5000, status: 'current' as const, customer: 'Ramya S.', phone: '+91 98765 43210', urgency: 'high' },
-    { id: 'DEL-002', address: 'HSR Layout Sector 7, 27th Cross', liters: 8000, status: 'pending' as const, customer: 'Amit K.', phone: '+91 98765 43211', urgency: 'normal' },
-    { id: 'DEL-003', address: 'Koramangala 4th Block, 80ft Road', liters: 10000, status: 'pending' as const, customer: 'Priya M.', phone: '+91 98765 43212', urgency: 'high' },
-    { id: 'DEL-004', address: 'BTM Layout 2nd Stage, 16th Main', liters: 6000, status: 'completed' as const, customer: 'Suresh R.', phone: '+91 98765 43213', urgency: 'normal' },
-  ];
+  const peerAlerts = useMemo(() => {
+    // Combine DB alerts with some high-fidelity mocks if DB is empty
+    const list = dbAlerts.length > 0 ? dbAlerts : [
+      {
+        id: 'ALERT-001',
+        driverId: 'DRV-2026-445',
+        driverName: 'Tanker-307',
+        type: 'mechanical',
+        message: 'Mechanical failure on ORR near Silk Board. Requesting backup for 8000L load.',
+        location: 'Silk Board Junction',
+        coordinates: [12.9177, 77.6238],
+        time: '2 min ago',
+        distance: '3.2 km away',
+      } as PeerAlert
+    ];
+    return list.sort((a, b) => (b as any).timestamp?.localeCompare((a as any).timestamp) || 0);
+  }, [dbAlerts]);
 
+  const completedDeliveries = deliveries.filter(d => d.status === 'completed');
   const todayEarnings = {
-    trips: 4,
-    liters: 29000,
-    base: 2400,
-    bonus: 350,
-    tips: 200,
-    total: 2950,
+    trips: completedDeliveries.length,
+    liters: completedDeliveries.reduce((sum, d) => sum + (d.liters || 0), 0),
+    base: completedDeliveries.length * 600, // ₹600 per trip
+    bonus: completedDeliveries.length * 100, // ₹100 efficiency bonus
+    tips: 0,
+    total: completedDeliveries.length * 700,
   };
 
   useEffect(() => {
@@ -85,31 +127,50 @@ export default function DriverView() {
   useEffect(() => {
     if (showSOS && sosCountdown > 0) {
       const timer = setTimeout(() => setSosCountdown(prev => prev - 1), 1000);
-      return () => clearTimeout(timer);
-    } else if (showSOS && sosCountdown === 0) {
-      setSosActive(true);
-      // Simulate adding own alert to peers
-      const newAlert: PeerAlert = {
-        id: 'ALERT-003',
-        driverId: 'DRV-2026-987',
-        driverName: 'You',
-        type: 'sos',
-        message: 'Emergency SOS broadcast. Driver requires immediate assistance.',
-        location: 'HSR Layout, 14th Main',
-        coordinates: [currentTanker.lat, currentTanker.lng],
-        time: 'Just now',
-        distance: '0 km',
-      };
-      setPeerAlerts(prev => [newAlert, ...prev]);
-    }
-  }, [showSOS, sosCountdown]);
+      return () => clearInterval(timer);
+    } else if (showSOS && sosCountdown === 0 && !sosActive) {
+      const triggerSOSInDB = async () => {
+        setSosActive(true);
+        const alertId = 'ALERT-' + Date.now();
+        const newAlert: any = {
+          id: alertId,
+          driverId: user?.driverId || user?.id || 'DRV-GUEST',
+          driverName: user?.name || 'Tanker Pilot',
+          type: selectedEmergencyType === 'stranded' ? 'sos' : selectedEmergencyType,
+          message: selectedEmergencyType === 'stranded' 
+            ? 'Emergency SOS broadcast. Driver requires immediate assistance.' 
+            : selectedEmergencyType === 'mechanical' 
+              ? 'Mechanical failure reported. Vehicle stationary.' 
+              : 'Hazardous road conditions reported. Proceed with caution.',
+          location: currentDelivery?.address?.split('—')[0]?.trim() || 'HSR Layout, 14th Main',
+          coordinates: [currentTanker.lat, currentTanker.lng],
+          timestamp: new Date().toISOString(),
+          time: 'Just now',
+          distance: '0 km',
+        };
 
-  const completeDelivery = () => {
-    if (currentDeliveryIndex < deliveries.length - 1) {
-      setCurrentDeliveryIndex(prev => prev + 1);
-      setEta(Math.floor(Math.random() * 20) + 15);
+        try {
+          await setDoc(doc(db, 'peer_alerts', alertId), newAlert);
+        } catch (e) {
+          console.error("SOS failed to broadcast", e);
+        }
+      };
+      triggerSOSInDB();
+    }
+  }, [showSOS, sosCountdown, currentTanker, user, selectedEmergencyType, currentDelivery, sosActive]);
+
+  const completeDelivery = async () => {
+    if (currentDelivery) {
+      try {
+        const docRef = doc(db, 'requests', currentDelivery.id);
+        await updateDoc(docRef, { status: 'Delivered' });
+        setEta(Math.floor(Math.random() * 20) + 15);
+      } catch (error) {
+        console.error("Error completing delivery:", error);
+      }
     }
   };
+
 
   const triggerSOS = () => {
     setShowSOS(true);
@@ -171,12 +232,21 @@ export default function DriverView() {
                   </div>
 
                   <div className="grid grid-cols-3 gap-2 mb-4">
-                    {['Stranded', 'Mechanical', 'Road Hazard'].map((type) => (
+                    {[
+                      { id: 'stranded', label: 'Stranded' },
+                      { id: 'mechanical', label: 'Mechanical' },
+                      { id: 'hazard', label: 'Hazard' }
+                    ].map((type) => (
                       <button
-                        key={type}
-                        className="py-2 px-2 rounded border border-border-dim bg-bg-card text-[9px] font-mono text-text-secondary hover:border-red/30 hover:text-red transition-all"
+                        key={type.id}
+                        onClick={() => setSelectedEmergencyType(type.id as any)}
+                        className={`py-2 px-2 rounded border font-mono text-[9px] transition-all ${
+                          selectedEmergencyType === type.id 
+                            ? 'bg-red text-white border-red shadow-md' 
+                            : 'border-border-dim bg-bg-card text-text-secondary hover:border-red/30 hover:text-red'
+                        }`}
                       >
-                        {type}
+                        {type.label}
                       </button>
                     ))}
                   </div>
@@ -238,7 +308,7 @@ export default function DriverView() {
               <Truck size={20} className="text-amber" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-text-primary">Driver Portal</h2>
+              <h2 className="text-sm font-semibold text-text-primary">{userName}</h2>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-mono text-cyan">{currentTanker.id}</span>
                 <span className="text-[9px] font-mono text-text-dim">• {currentTanker.plate}</span>
@@ -302,75 +372,122 @@ export default function DriverView() {
                 exit={{ opacity: 0, x: 20 }}
                 className="space-y-4"
               >
-                {/* Current delivery card */}
-                <div className="bg-bg-card border border-neon/20 rounded-lg overflow-hidden glow-neon">
-                  <div className="bg-neon/10 px-4 py-2 border-b border-neon/20 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <motion.div
-                        animate={{ scale: [1, 1.3, 1] }}
-                        transition={{ duration: 1.5, repeat: Infinity }}
-                        className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"
-                      />
-                      <span className="text-[10px] font-mono uppercase text-neon font-bold">Current Delivery</span>
-                    </div>
-                    <span className="text-lg font-mono font-bold text-neon">ETA {eta}m</span>
+                {/* Stats Row */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-bg-card border border-border-dim rounded-lg p-3 text-center">
+                    <span className="text-xs font-mono font-bold text-cyan block">{todayEarnings.trips}</span>
+                    <span className="text-[8px] font-mono text-text-dim uppercase">Trips</span>
                   </div>
-
-                  <div className="p-4">
-                    <div className="flex items-start gap-3 mb-4">
-                      <div className="w-8 h-8 rounded-full bg-red/10 border border-red/30 flex items-center justify-center shrink-0">
-                        <MapPin size={14} className="text-red" />
-                      </div>
-                      <div className="flex-1">
-                        <span className="text-xs font-mono text-text-primary font-semibold block">{deliveries[currentDeliveryIndex].address}</span>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-[9px] font-mono text-cyan">{deliveries[currentDeliveryIndex].liters.toLocaleString()}L</span>
-                          <span className="text-[9px] font-mono text-text-dim">•</span>
-                          <span className={`text-[9px] font-mono ${deliveries[currentDeliveryIndex].urgency === 'high' ? 'text-red' : 'text-text-dim'}`}>
-                            {deliveries[currentDeliveryIndex].urgency.toUpperCase()}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Customer info */}
-                    <div className="flex items-center justify-between mb-4 bg-bg-primary/50 rounded p-3">
-                      <div>
-                        <span className="text-[10px] font-mono text-text-dim block">Customer</span>
-                        <span className="text-xs font-mono text-text-primary font-semibold">{deliveries[currentDeliveryIndex].customer}</span>
-                      </div>
-                      <motion.button
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        className="w-10 h-10 rounded-full bg-neon/10 border border-neon/30 flex items-center justify-center hover:bg-neon/20 transition-all"
-                      >
-                        <Phone size={16} className="text-neon" />
-                      </motion.button>
-                    </div>
-
-                    {/* Action buttons */}
-                    <div className="grid grid-cols-2 gap-2">
-                      <motion.button
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        onClick={() => setActiveTab('route')}
-                        className="py-3 rounded border border-cyan/40 bg-cyan/10 text-cyan font-mono font-bold text-[10px] uppercase tracking-wider hover:bg-cyan/20 transition-all flex items-center justify-center gap-1.5"
-                      >
-                        <Navigation size={14} />
-                        Navigate
-                      </motion.button>
-                      <motion.button
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        onClick={completeDelivery}
-                        className="py-3 rounded border border-neon/40 bg-neon/10 text-neon font-mono font-bold text-[10px] uppercase tracking-wider hover:bg-neon/20 transition-all flex items-center justify-center gap-1.5"
-                      >
-                        <CheckCircle size={14} />
-                        Complete
-                      </motion.button>
-                    </div>
+                  <div className="bg-bg-card border border-border-dim rounded-lg p-3 text-center">
+                    <span className="text-xs font-mono font-bold text-neon block">{(todayEarnings.liters/1000).toFixed(1)}K</span>
+                    <span className="text-[8px] font-mono text-text-dim uppercase">Liters</span>
+                  </div>
+                  <div className="bg-bg-card border border-border-dim rounded-lg p-3 text-center">
+                    <span className="text-xs font-mono font-bold text-amber block">₹{todayEarnings.total}</span>
+                    <span className="text-[8px] font-mono text-text-dim uppercase">Earned</span>
                   </div>
                 </div>
+
+                {/* Vehicle Health */}
+                <div className="bg-bg-card border border-border-dim rounded-lg px-4 py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-400/10 flex items-center justify-center">
+                      <Shield size={16} className="text-emerald-400" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-mono text-text-dim block uppercase">Vehicle Health</span>
+                      <span className="text-xs font-mono text-emerald-400 font-bold tracking-tight">SYSTEMS NOMINAL</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] font-mono text-text-dim block">Fuel</span>
+                    <span className="text-xs font-mono text-text-primary">84%</span>
+                  </div>
+                </div>
+                {/* Current delivery card */}
+                {currentDelivery ? (
+                  <div className="bg-bg-card border border-neon/20 rounded-lg overflow-hidden glow-neon">
+                    <div className="bg-neon/10 px-4 py-2 border-b border-neon/20 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <motion.div
+                          animate={{ scale: [1, 1.3, 1] }}
+                          transition={{ duration: 1.5, repeat: Infinity }}
+                          className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"
+                        />
+                        <span className="text-[10px] font-mono uppercase text-neon font-bold">
+                          {currentDelivery.status === 'current' ? 'Active Mission' : 'Assigned - Standby'}
+                        </span>
+                      </div>
+                      <span className="text-lg font-mono font-bold text-neon">ETA {eta}m</span>
+                    </div>
+
+                    <div className="p-4">
+                      <div className="flex items-start gap-3 mb-4">
+                        <div className="w-8 h-8 rounded-full bg-red/10 border border-red/30 flex items-center justify-center shrink-0">
+                          <MapPin size={14} className="text-red" />
+                        </div>
+                        <div className="flex-1">
+                          <span className="text-xs font-mono text-text-primary font-semibold block">{currentDelivery?.address}</span>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[9px] font-mono text-cyan">{currentDelivery?.liters?.toLocaleString()}L</span>
+                            <span className="text-[9px] font-mono text-text-dim">•</span>
+                            <span className={`text-[9px] font-mono ${currentDelivery?.urgency === 'high' ? 'text-red' : 'text-text-dim'}`}>
+                              {currentDelivery?.urgency?.toUpperCase()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Customer info */}
+                      <div className="flex items-center justify-between mb-4 bg-bg-primary/50 rounded p-3">
+                        <div>
+                          <span className="text-[10px] font-mono text-text-dim block">Customer</span>
+                          <span className="text-xs font-mono text-text-primary font-semibold">{currentDelivery?.customer}</span>
+                        </div>
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => window.location.href = `tel:${currentDelivery?.phone || '+919876543210'}`}
+                          className="w-10 h-10 rounded-full bg-neon/10 border border-neon/30 flex items-center justify-center hover:bg-neon/20 transition-all"
+                        >
+                          <Phone size={16} className="text-neon" />
+                        </motion.button>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <motion.button
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={() => {
+                            setActiveTab('route');
+                            const destination = encodeURIComponent(currentDelivery?.address || '');
+                            window.open(`https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`, '_blank');
+                          }}
+                          className="py-3 rounded border border-cyan/40 bg-cyan/10 text-cyan font-mono font-bold text-[10px] uppercase tracking-wider hover:bg-cyan/20 transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <Navigation size={14} />
+                          Navigate
+                        </motion.button>
+                        <motion.button
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={completeDelivery}
+                          className="py-3 rounded border border-neon/40 bg-neon/10 text-neon font-mono font-bold text-[10px] uppercase tracking-wider hover:bg-neon/20 transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <CheckCircle size={14} />
+                          Complete
+                        </motion.button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-bg-card border border-border-dim border-dashed rounded-lg p-8 text-center">
+                    <Truck size={32} className="text-text-dim mx-auto mb-3 opacity-20" />
+                    <h3 className="text-sm font-mono font-bold text-text-dim uppercase">Awaiting Dispatch</h3>
+                    <p className="text-[10px] font-mono text-text-dim mt-1">Standby for new delivery coordinates from BWSSB Command.</p>
+                  </div>
+                )}
 
                 {/* Citizen Requests Queue */}
                 <div className="bg-bg-card border border-border-dim rounded-lg p-4">
@@ -379,6 +496,12 @@ export default function DriverView() {
                     Citizen Requests ({deliveries.filter(d => d.status === 'pending').length} pending)
                   </h3>
                   <div className="space-y-2">
+                    {deliveries.length === 0 && (
+                      <div className="py-8 text-center border border-dashed border-border-dim rounded-lg">
+                        <Package size={24} className="text-text-dim mx-auto mb-2 opacity-30" />
+                        <p className="text-[10px] font-mono text-text-dim uppercase">No pending requests</p>
+                      </div>
+                    )}
                     {deliveries.map((delivery, i) => (
                       <div
                         key={delivery.id}
@@ -464,43 +587,47 @@ export default function DriverView() {
                 {/* Map */}
                 <div className="h-[300px] rounded-lg overflow-hidden border border-cyan/20 glow-cyan">
                   <MapContainer
-                    center={[currentTanker.lat, currentTanker.lng]}
+                    center={[currentTanker.lat || 12.9716, currentTanker.lng || 77.5946]}
                     zoom={14}
                     className="h-full w-full"
                     zoomControl={false}
                     attributionControl={false}
                   >
-                    <MapContent center={[currentTanker.lat, currentTanker.lng]} />
+                    <MapContent center={[currentTanker.lat || 12.9716, currentTanker.lng || 77.5946]} />
                     <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
                     
-                    <Polyline
-                      positions={currentTanker.route}
-                      pathOptions={{
-                        color: '#10B981',
-                        weight: 3,
-                        opacity: 0.8,
-                        dashArray: '10 6',
-                      }}
-                    />
+                    {currentDelivery?.status === 'current' && (
+                      <>
+                        <Polyline
+                          positions={currentTanker.route || [[currentTanker.lat, currentTanker.lng], [currentTanker.targetLat || currentTanker.lat, currentTanker.targetLng || currentTanker.lng]]}
+                          pathOptions={{
+                            color: '#10B981',
+                            weight: 3,
+                            opacity: 0.8,
+                            dashArray: '10 6',
+                          }}
+                        />
+
+                        <CircleMarker
+                          center={[currentTanker.targetLat || currentTanker.lat, currentTanker.targetLng || currentTanker.lng]}
+                          radius={8}
+                          pathOptions={{
+                            color: '#EF4444',
+                            fillColor: '#EF4444',
+                            fillOpacity: 0.6,
+                            weight: 2,
+                          }}
+                        />
+                      </>
+                    )}
 
                     <CircleMarker
-                      center={[currentTanker.lat, currentTanker.lng]}
+                      center={[currentTanker.lat || 12.9716, currentTanker.lng || 77.5946]}
                       radius={8}
                       pathOptions={{
                         color: '#0EA5E9',
                         fillColor: '#0EA5E9',
                         fillOpacity: 0.8,
-                        weight: 2,
-                      }}
-                    />
-
-                    <CircleMarker
-                      center={currentTanker.route[currentTanker.route.length - 1]}
-                      radius={8}
-                      pathOptions={{
-                        color: '#EF4444',
-                        fillColor: '#EF4444',
-                        fillOpacity: 0.6,
                         weight: 2,
                       }}
                     />
@@ -540,32 +667,39 @@ export default function DriverView() {
                     <span className="text-[9px] font-mono text-neon bg-neon/10 px-2 py-0.5 rounded">A* ALGORITHM</span>
                   </div>
                   <div className="space-y-3">
-                    {currentTanker.route.map((point, i) => (
-                      <div key={i} className="flex items-center gap-3">
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center border ${
-                          i === 0 ? 'border-cyan bg-cyan/10' : i === currentTanker.route.length - 1 ? 'border-red bg-red/10' : 'border-border-dim'
-                        }`}>
-                          {i === 0 ? (
-                            <Truck size={10} className="text-cyan" />
-                          ) : i === currentTanker.route.length - 1 ? (
-                            <MapPin size={10} className="text-red" />
-                          ) : (
-                            <span className="text-[8px] font-mono text-text-dim">{i}</span>
+                    {currentDelivery?.status === 'current' ? (
+                      (currentTanker.route || [[currentTanker.lat, currentTanker.lng], [currentTanker.targetLat || currentTanker.lat, currentTanker.targetLng || currentTanker.lng]]).map((point: any, i: number, arr: any[]) => (
+                        <div key={i} className="flex items-center gap-3">
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center border ${
+                            i === 0 ? 'border-cyan bg-cyan/10' : i === arr.length - 1 ? 'border-red bg-red/10' : 'border-border-dim'
+                          }`}>
+                            {i === 0 ? (
+                              <Truck size={10} className="text-cyan" />
+                            ) : i === arr.length - 1 ? (
+                              <MapPin size={10} className="text-red" />
+                            ) : (
+                              <span className="text-[8px] font-mono text-text-dim">{i}</span>
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <span className="text-[10px] font-mono text-text-primary">
+                              {i === 0 ? 'Current Location' : i === arr.length - 1 ? (currentTanker.destinationArea || currentDelivery?.address || 'Destination') : `Waypoint ${i}`}
+                            </span>
+                            <span className="text-[8px] font-mono text-text-dim block">
+                              {point[0]?.toFixed(4)}°N, {point[1]?.toFixed(4)}°E
+                            </span>
+                          </div>
+                          {i < arr.length - 1 && (
+                            <ChevronRight size={12} className="text-text-dim" />
                           )}
                         </div>
-                        <div className="flex-1">
-                          <span className="text-[10px] font-mono text-text-primary">
-                            {i === 0 ? 'Current Location' : i === currentTanker.route.length - 1 ? deliveries[currentDeliveryIndex].address : `Waypoint ${i}`}
-                          </span>
-                          <span className="text-[8px] font-mono text-text-dim block">
-                            {point[0].toFixed(4)}°N, {point[1].toFixed(4)}°E
-                          </span>
-                        </div>
-                        {i < currentTanker.route.length - 1 && (
-                          <ChevronRight size={12} className="text-text-dim" />
-                        )}
+                      ))
+                    ) : (
+                      <div className="py-4 text-center">
+                        <Navigation size={20} className="text-text-dim mx-auto mb-2 opacity-20" />
+                        <p className="text-[10px] font-mono text-text-dim uppercase">No active route assigned</p>
                       </div>
-                    ))}
+                    )}
                   </div>
                 </div>
               </motion.div>
@@ -646,11 +780,20 @@ export default function DriverView() {
 
                           {alert.driverName !== 'You' && (
                             <div className="grid grid-cols-2 gap-2 mt-3">
-                              <button className="py-2 rounded border border-neon/30 bg-neon/10 text-neon font-mono text-[9px] uppercase hover:bg-neon/20 transition-all flex items-center justify-center gap-1">
+                              <button 
+                                onClick={() => {
+                                  const dest = alert.coordinates ? `${alert.coordinates[0]},${alert.coordinates[1]}` : encodeURIComponent(alert.location);
+                                  window.open(`https://www.google.com/maps/dir/?api=1&destination=${dest}`, '_blank');
+                                }}
+                                className="py-2 rounded border border-neon/30 bg-neon/10 text-neon font-mono text-[9px] uppercase hover:bg-neon/20 transition-all flex items-center justify-center gap-1"
+                              >
                                 <Navigation size={10} />
                                 Navigate
                               </button>
-                              <button className="py-2 rounded border border-cyan/30 bg-cyan/10 text-cyan font-mono text-[9px] uppercase hover:bg-cyan/20 transition-all flex items-center justify-center gap-1">
+                              <button 
+                                onClick={() => window.location.href = `tel:+919876543210`}
+                                className="py-2 rounded border border-cyan/30 bg-cyan/10 text-cyan font-mono text-[9px] uppercase hover:bg-cyan/20 transition-all flex items-center justify-center gap-1"
+                              >
                                 <Phone size={10} />
                                 Call Driver
                               </button>
@@ -707,6 +850,31 @@ export default function DriverView() {
                     <Droplets size={16} className="text-cyan mx-auto mb-1" />
                     <span className="text-xl font-mono font-bold text-cyan block">{(todayEarnings.liters / 1000).toFixed(0)}K</span>
                     <span className="text-[8px] font-mono text-text-dim uppercase">Liters Delivered</span>
+                  </div>
+                </div>
+
+                {/* Recent Payouts */}
+                <div className="bg-bg-card border border-border-dim rounded-lg p-4">
+                  <h3 className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-dim mb-3">Recent Payouts</h3>
+                  <div className="space-y-2">
+                    {completedDeliveries.length > 0 ? (
+                      completedDeliveries.map((delivery, i) => (
+                        <div key={i} className="flex items-center justify-between py-2 border-b border-border-dim last:border-0">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle size={10} className="text-emerald-400" />
+                            <span className="text-[10px] font-mono text-text-primary">Trip #{delivery.id.slice(-4)}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] font-mono text-text-primary font-bold">₹700</span>
+                            <span className="text-[8px] font-mono text-emerald-400 block">Settled</span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="py-4 text-center border border-dashed border-border-dim rounded">
+                        <p className="text-[9px] font-mono text-text-dim uppercase">No recent payouts</p>
+                      </div>
+                    )}
                   </div>
                 </div>
 

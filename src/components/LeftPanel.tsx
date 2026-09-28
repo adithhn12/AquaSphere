@@ -9,9 +9,10 @@ interface LeftPanelProps {
   onReportLeak?: () => void;
   /** Live count from global state — replaces the static 87 */
   pendingRequestCount?: number;
+  isAdmin?: boolean;
 }
 
-export default function LeftPanel({ onRequestTanker, onReportLeak, pendingRequestCount }: LeftPanelProps) {
+export default function LeftPanel({ onRequestTanker, onReportLeak, pendingRequestCount, isAdmin }: LeftPanelProps) {
   const [eta, setEta] = useState(24);
   const [progress, setProgress] = useState(62);
   const [tipIndex, setTipIndex] = useState(0);
@@ -37,25 +38,34 @@ export default function LeftPanel({ onRequestTanker, onReportLeak, pendingReques
   }, []);
 
   return (
-    <div className="h-full overflow-y-auto p-4 space-y-4 bg-[#F1F5F9]">
-      <h2 className="text-xs font-semibold uppercase tracking-widest text-[#94A3B8]">Quick Actions</h2>
+    <div className="h-full overflow-y-auto p-4 space-y-4 bg-bg-primary">
+      <h2 className="text-xs font-semibold uppercase tracking-widest text-text-dim">
+        {isAdmin ? 'Manual Overrides' : 'Quick Actions'}
+      </h2>
 
       {/* Action Buttons */}
       <div className="grid grid-cols-2 gap-3">
         <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={onRequestTanker}
-          className="py-4 rounded-xl border border-cyan/20 bg-white text-cyan font-semibold text-sm hover:bg-cyan/5 transition-all flex flex-col items-center gap-2 group shadow-sm">
+          className={`py-4 rounded-xl border bg-bg-card font-semibold text-sm transition-all flex flex-col items-center gap-2 group shadow-sm ${
+            isAdmin ? 'border-sky-200 text-sky-600 hover:bg-sky-50' : 'border-cyan/20 text-cyan hover:bg-cyan/5'
+          }`}>
           <Truck size={20} />
-          <span className="flex items-center gap-1">Request Tanker <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" /></span>
+          <span className="flex items-center gap-1 text-text-primary">
+            {isAdmin ? 'Manual Dispatch' : 'Request Tanker'} 
+            <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+          </span>
         </motion.button>
         <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={onReportLeak}
-          className="py-4 rounded-xl border border-amber/20 bg-white text-amber font-semibold text-sm hover:bg-amber/5 transition-all flex flex-col items-center gap-2 shadow-sm">
-          <Droplets size={20} />
-          Report Leak
+          className={`py-4 rounded-xl border bg-bg-card font-semibold text-sm transition-all flex flex-col items-center gap-2 shadow-sm ${
+            isAdmin ? 'border-amber-200 text-amber-600 hover:bg-amber-50' : 'border-amber/20 text-amber hover:bg-amber/5'
+          }`}>
+          <AlertTriangle size={20} />
+          <span className="text-text-primary">{isAdmin ? 'Log Incident' : 'Report Leak'}</span>
         </motion.button>
       </div>
 
       {/* Active Order */}
-      <div className="rounded-xl border border-[#E2E8F0] bg-white p-4 shadow-sm">
+      <div className="rounded-xl border border-border-dim bg-bg-card p-4 shadow-sm">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-neon animate-pulse" />
@@ -63,45 +73,45 @@ export default function LeftPanel({ onRequestTanker, onReportLeak, pendingReques
           </div>
           <span className="text-sm font-bold font-mono text-cyan">ETA {eta}m</span>
         </div>
-        <div className="relative h-2 bg-[#F1F5F9] rounded-full overflow-hidden mb-3">
+        <div className="relative h-2 bg-bg-primary rounded-full overflow-hidden mb-3">
           <motion.div animate={{ width: `${progress}%` }} className="h-full bg-gradient-to-r from-cyan to-neon rounded-full" />
         </div>
         <div className="flex items-center gap-2">
-          <Truck size={14} className="text-[#94A3B8]" />
-          <p className="text-[13px] text-[#64748B]">
+          <Truck size={14} className="text-text-dim" />
+          <p className="text-[13px] text-text-secondary">
             <span className="text-cyan font-medium">KA-01-MQ-4421</span> — Indiranagar 80ft Rd
           </p>
         </div>
       </div>
 
       {/* Your Ward */}
-      <div className="rounded-xl border border-[#E2E8F0] bg-white p-4 shadow-sm">
+      <div className="rounded-xl border border-border-dim bg-bg-card p-4 shadow-sm">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-[#1E293B]">HSR Layout <span className="text-[#94A3B8] font-normal text-xs">W174</span></h3>
+          <h3 className="text-sm font-semibold text-text-primary">HSR Layout <span className="text-text-dim font-normal text-xs">W174</span></h3>
         </div>
         <div className="flex items-center gap-2.5 bg-red/5 border border-red/15 rounded-lg px-3 py-2.5 mb-3">
           <AlertTriangle size={16} className="text-red shrink-0" />
           <span className="text-[13px] text-red font-medium">Critical Shortage Alert</span>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg p-3 text-center">
+          <div className="bg-bg-primary border border-border-dim rounded-lg p-3 text-center">
             <Droplets size={16} className="text-red mx-auto mb-1.5" />
             <span className="text-lg font-bold font-mono text-red block">31%</span>
-            <span className="text-[11px] text-[#94A3B8]">Reservoir</span>
+            <span className="text-[11px] text-text-dim">Reservoir</span>
           </div>
-          <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg p-3 text-center">
+          <div className="bg-bg-primary border border-border-dim rounded-lg p-3 text-center">
             <Clock size={16} className="text-amber mx-auto mb-1.5" />
             <span className="text-lg font-bold font-mono text-amber block">31m</span>
-            <span className="text-[11px] text-[#94A3B8]">Avg ETA</span>
+            <span className="text-[11px] text-text-dim">Avg ETA</span>
           </div>
         </div>
       </div>
 
       {/* Ops Snapshot */}
-      <div className="rounded-xl border border-[#E2E8F0] bg-white p-4 shadow-sm">
+      <div className="rounded-xl border border-border-dim bg-bg-card p-4 shadow-sm">
         <div className="flex items-center gap-2 mb-3">
-          <Gauge size={14} className="text-[#94A3B8]" />
-          <h3 className="text-xs font-semibold uppercase tracking-widest text-[#94A3B8]">Ops Snapshot</h3>
+          <Gauge size={14} className="text-text-dim" />
+          <h3 className="text-xs font-semibold uppercase tracking-widest text-text-dim">Ops Snapshot</h3>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <StatTile label="Tankers" value={activeTankers} color="cyan" compact icon={<Truck size={12} />} />

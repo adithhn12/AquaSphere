@@ -4,32 +4,63 @@ import { Brain, Radio, TrendingUp } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, CartesianGrid, Tooltip } from 'recharts';
 import ForecastBar from './ForecastBar';
 import IncidentCard from './IncidentCard';
-import { forecastWards, incidents, demandHistory } from '../data/mockData';
+import { useFirestore } from '../hooks/useFirestore';
+import type { Incident, DemandDataPoint } from '../data/mockData';
+import { db } from '../firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+
+interface ForecastWard {
+  id: string;
+  name: string;
+  prob: number;
+  change: string;
+  status: 'critical' | 'risk' | 'stable';
+}
 
 export default function RightPanel() {
-  const [chartData, setChartData] = useState(demandHistory);
+  const { data: dbForecastWards } = useFirestore<ForecastWard>('forecastWards');
+  const { data: dbIncidents } = useFirestore<Incident>('incidents');
+  const [chartData, setChartData] = useState<DemandDataPoint[]>([]);
+
+  // Fallback logic for lists
+  const forecastWards = dbForecastWards.length > 0 ? dbForecastWards : [
+    { id: 'W118', name: 'Varthur', prob: 94, change: '+28%', status: 'critical' as const },
+    { id: 'W174', name: 'HSR Layout', prob: 89, change: '+31%', status: 'critical' as const },
+    { id: 'W150', name: 'Bellandur', prob: 86, change: '+22%', status: 'critical' as const },
+  ];
+
+  const incidents = dbIncidents.length > 0 ? dbIncidents : [
+    { id: 'F1', type: 'LEAK_REPORT', time: 'Now', ward: 'BTM Layout', description: 'Major leak reported at Sec 4', severity: 'high' as const },
+  ];
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setChartData(prev =>
-        prev.map(d => ({
-          ...d,
-          demand: Math.max(10, Math.min(100, d.demand + (Math.random() * 4 - 2))),
-          supply: Math.max(10, Math.min(100, d.supply + (Math.random() * 3 - 1.5))),
-        }))
-      );
-    }, 5000);
-    return () => clearInterval(interval);
+    console.log("Listening for demandHistory...");
+    const unsub = onSnapshot(doc(db, 'stats', 'demandHistory'), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data().data;
+        console.log("Demand data received:", data);
+        setChartData(data);
+      } else {
+        // FALLBACK: Use local mock data if DB is empty
+        console.warn("stats/demandHistory document does not exist. Using local fallback.");
+        import('../data/mockData').then(m => setChartData(m.demandHistory));
+      }
+    }, (error) => {
+      console.error("Firestore Error in RightPanel:", error);
+      // FALLBACK on error
+      import('../data/mockData').then(m => setChartData(m.demandHistory));
+    });
+    return () => unsub();
   }, []);
 
   return (
-    <div className="h-full overflow-y-auto p-4 space-y-4 bg-[#F1F5F9]">
+    <div className="h-full overflow-y-auto p-4 space-y-4 bg-bg-primary">
       {/* Forecast */}
-      <div className="rounded-xl border border-[#E2E8F0] bg-white p-4 shadow-sm">
+      <div className="rounded-xl border border-border-dim bg-bg-card p-4 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Brain size={16} className="text-cyan" />
-            <h3 className="text-sm font-semibold text-[#1E293B]">7-Day Shortage Forecast</h3>
+            <h3 className="text-sm font-semibold text-text-primary">7-Day Shortage Forecast</h3>
           </div>
           <span className="text-[10px] font-mono text-cyan bg-cyan/8 px-2 py-1 rounded-md border border-cyan/15">
             PROPHET v2.1
@@ -42,10 +73,10 @@ export default function RightPanel() {
       </div>
 
       {/* Incident Feed */}
-      <div className="rounded-xl border border-[#E2E8F0] bg-white p-4 shadow-sm">
+      <div className="rounded-xl border border-border-dim bg-bg-card p-4 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-[#1E293B]">Incident Feed</h3>
+            <h3 className="text-sm font-semibold text-text-primary">Incident Feed</h3>
             <motion.div animate={{ scale: [1, 1.4, 1], opacity: [1, 0.4, 1] }}
               transition={{ duration: 1.5, repeat: Infinity }} className="w-2 h-2 rounded-full bg-red" />
           </div>
@@ -62,11 +93,11 @@ export default function RightPanel() {
       </div>
 
       {/* Demand Chart */}
-      <div className="rounded-xl border border-[#E2E8F0] bg-white p-4 shadow-sm">
+      <div className="rounded-xl border border-border-dim bg-bg-card p-4 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <TrendingUp size={16} className="text-cyan" />
-            <h3 className="text-sm font-semibold text-[#1E293B]">Today's Demand vs Supply</h3>
+            <h3 className="text-sm font-semibold text-text-primary">Today's Demand vs Supply</h3>
           </div>
         </div>
         <div className="h-[170px]">
@@ -82,10 +113,10 @@ export default function RightPanel() {
                   <stop offset="95%" stopColor="#0EA5E9" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-              <XAxis dataKey="hour" tick={{ fill: '#94A3B8', fontSize: 11 }} axisLine={{ stroke: '#E2E8F0' }} tickLine={false} />
-              <YAxis tick={{ fill: '#94A3B8', fontSize: 11 }} axisLine={{ stroke: '#E2E8F0' }} tickLine={false} />
-              <Tooltip contentStyle={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: 12, fontSize: 12, color: '#1E293B' }}
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-dim)" />
+              <XAxis dataKey="hour" tick={{ fill: '#94A3B8', fontSize: 11 }} axisLine={{ stroke: 'var(--color-border-dim)' }} tickLine={false} />
+              <YAxis tick={{ fill: '#94A3B8', fontSize: 11 }} axisLine={{ stroke: 'var(--color-border-dim)' }} tickLine={false} />
+              <Tooltip contentStyle={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border-dim)', borderRadius: 12, fontSize: 12, color: 'var(--color-text-primary)' }}
                 labelStyle={{ color: '#94A3B8' }} />
               <Area type="monotone" dataKey="demand" stroke="#EF4444" fill="url(#demandGrad)" strokeWidth={2} dot={false} />
               <Area type="monotone" dataKey="supply" stroke="#0EA5E9" fill="url(#supplyGrad)" strokeWidth={2} dot={false} />

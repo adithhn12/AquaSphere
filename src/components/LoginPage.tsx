@@ -2,13 +2,11 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, User, Lock, Eye, EyeOff, AlertTriangle, Fingerprint, Cpu, Radio, Globe, Info, Mail, IdCard, Key, Truck, MapPin, Droplets, Bell, Users, Database, Settings } from 'lucide-react';
 import { 
-  authenticateAdmin, 
-  authenticateCitizen, 
-  authenticateDriver, 
-  authenticateGuest,
   demoCredentials,
   type User as DBUser,
 } from '../data/users';
+import { db } from '../firebase';
+import { collection, query, where, getDocs, setDoc, doc } from 'firebase/firestore';
 
 interface LoginPageProps {
   onLogin: (user: { 
@@ -48,10 +46,10 @@ const roleConfigs: RoleConfig[] = [
     label: 'Citizen',
     icon: <User size={14} />,
     color: 'neon',
-    fieldLabel: 'BWSSB RR Number',
-    fieldPlaceholder: 'e.g., W-1234567A',
+    fieldLabel: 'RR Number (e.g. C101)',
+    fieldPlaceholder: 'C101',
     fieldIcon: <IdCard size={14} />,
-    instruction: 'Please enter your unique 8-character BWSSB RR Number. This can be found at the top of your water bill or painted near your water meter to verify your water connection.',
+    instruction: 'Enter your unique RR Number. For demo purposes, you can use a simple ID like C101.',
     showPassword: true,
     passwordLabel: 'Password',
     tagline: 'Residential user tier for municipal water services',
@@ -66,10 +64,10 @@ const roleConfigs: RoleConfig[] = [
     label: 'Driver',
     icon: <Cpu size={14} />,
     color: 'amber',
-    fieldLabel: 'Driver ID / Employee ID',
-    fieldPlaceholder: 'e.g., DRV-2026-987',
+    fieldLabel: 'Driver ID (e.g. D101)',
+    fieldPlaceholder: 'D101',
     fieldIcon: <IdCard size={14} />,
-    instruction: 'Enter your official Driver ID assigned by the transport authority or contractor to authorize your tanker profile.',
+    instruction: 'Enter your official Driver ID. For demo purposes, you can use a simple ID like D101.',
     showPassword: true,
     passwordLabel: 'Password',
     tagline: 'Operational field tier for transit & safety',
@@ -84,10 +82,10 @@ const roleConfigs: RoleConfig[] = [
     label: 'BWSSB Manager',
     icon: <Shield size={14} />,
     color: 'cyan',
-    fieldLabel: 'Admin ID / Security Token',
-    fieldPlaceholder: 'e.g., ADMIN-001',
+    fieldLabel: 'Admin ID',
+    fieldPlaceholder: 'ADMIN-001',
     fieldIcon: <Key size={14} />,
-    instruction: 'Enter your authorized Admin ID and secure access token. This action is logged for internal security auditing.',
+    instruction: 'Enter your authorized Admin ID and secure access token.',
     showPassword: true,
     passwordLabel: 'Secure Access Token',
     tagline: 'Administrative tier with master privileges',
@@ -102,10 +100,10 @@ const roleConfigs: RoleConfig[] = [
     label: 'Guest',
     icon: <Globe size={14} />,
     color: 'text-secondary',
-    fieldLabel: 'Email Address',
-    fieldPlaceholder: 'alex@example.com',
-    fieldIcon: <Mail size={14} />,
-    instruction: 'Enter your email address to receive a one-time verification link for temporary guest access.',
+    fieldLabel: 'Full Name',
+    fieldPlaceholder: 'Alex Kumar',
+    fieldIcon: <User size={14} />,
+    instruction: 'Enter your name and phone number for temporary public observer access.',
     showPassword: false,
     passwordLabel: '',
     tagline: 'Public tier for limited system observation',
@@ -126,6 +124,11 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [authStep, setAuthStep] = useState(0);
   const [otpSent, setOtpSent] = useState(false);
   const [showFeatures, setShowFeatures] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [ward, setWard] = useState('HSR Layout');
+  const [address, setAddress] = useState('');
 
   const currentConfig = roleConfigs.find(r => r.id === role)!;
 
@@ -134,72 +137,158 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     setError('');
     setIsLoading(true);
 
-    const steps = role === 'guest' 
-      ? ['VALIDATING EMAIL...', 'GENERATING OTP...', 'SENDING VERIFICATION LINK...', 'CHECK YOUR INBOX']
-      : ['VALIDATING CREDENTIALS...', 'QUERYING DATABASE...', 'VERIFYING ACCESS LEVEL...', 'ACCESS GRANTED'];
+    const steps = isSignUp 
+      ? ['PREPARING SECURE CHANNEL...', 'ENCRYPTING CREDENTIALS...', 'CREATING PROFILE...', 'WELCOME TO AQUASPHERE']
+      : role === 'guest' 
+        ? ['SECURE HANDSHAKE...', 'INITIALIZING GUEST SESSION...', 'SYNCING LIVE MAP...', 'WELCOME TO AQUASPHERE']
+        : ['VALIDATING CREDENTIALS...', 'QUERYING DATABASE...', 'VERIFYING ACCESS LEVEL...', 'ACCESS GRANTED'];
     
     for (let i = 0; i < steps.length; i++) {
       setAuthStep(i);
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    // Validate based on role
-    let authResult;
-    
-    switch (role) {
-      case 'bwssb_manager':
-        authResult = authenticateAdmin(identifier, password);
-        break;
-      case 'citizen':
-        authResult = authenticateCitizen(identifier, password);
-        break;
-      case 'driver':
-        authResult = authenticateDriver(identifier, password);
-        break;
-      case 'guest':
-        authResult = authenticateGuest(identifier);
-        break;
-      default:
-        authResult = { success: false, user: null, error: 'Invalid role', sessionToken: null };
-    }
+    try {
+      const usersRef = collection(db, 'users');
 
-    setIsLoading(false);
-    setAuthStep(0);
+      if (isSignUp) {
+        // Sign Up Logic: Simplify requirements
+        if (!name || (role !== 'guest' && !password)) {
+          setError('All fields are required');
+          setIsLoading(false);
+          return;
+        }
 
-    if (!authResult.success || !authResult.user) {
-      setError(authResult.error || 'Authentication failed');
-      return;
-    }
+        // Generate simple ID if blank
+        let userId = identifier;
+        if (!userId) {
+          const prefix = role === 'citizen' ? 'C' : (role === 'driver' ? 'D' : 'G');
+          userId = prefix + Math.floor(100 + Math.random() * 900);
+        }
+        
+        const newUser: any = {
+          id: userId,
+          name,
+          email: role === 'guest' ? `${name.toLowerCase().replace(' ', '.')}@guest.com` : `${name.toLowerCase().replace(' ', '.')}@example.com`,
+          role: role === 'bwssb_manager' ? 'admin' : role,
+          phone,
+          isActive: true,
+          createdAt: new Date().toISOString(),
+        };
 
-    // For guest, show OTP sent message first
-    if (role === 'guest') {
-      setOtpSent(true);
-      setTimeout(() => {
+        if (role === 'citizen') {
+          newUser.rrNumber = userId; // Use generated or provided ID
+          newUser.password = password;
+          newUser.ward = ward;
+          newUser.address = address;
+          newUser.wardId = 'W-' + Math.floor(Math.random() * 200);
+          newUser.conservationScore = 0;
+          newUser.totalRequests = 0;
+          newUser.leaksReported = 0;
+        } else if (role === 'driver') {
+          newUser.password = password;
+          newUser.tankerId = 'TNK-' + userId.slice(1); // Link to a tanker
+        } else if (role === 'bwssb_manager') {
+          newUser.accessToken = password;
+        }
+
+        await setDoc(doc(db, 'users', userId), newUser);
+
+        // Show a quick success message so the user sees their new ID
+        setError(''); // Clear errors
+        const msg = `Success! Your ${role === 'citizen' ? 'RR Number' : 'Driver ID'} is: ${userId}`;
+        // We can use the error state to show this message for 2 seconds before login
+        setError(msg); 
+        
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
         onLogin({
-          email: authResult.user!.email,
-          role: 'guest',
-          sessionToken: authResult.sessionToken!,
-          userData: authResult.user!,
+          email: newUser.email,
+          role: role,
+          sessionToken: 'session-' + Date.now(),
+          userData: newUser,
         });
-      }, 2000);
-      return;
-    }
+        return;
+      }
 
-    // Map database role to app role
-    const appRole = authResult.user.role === 'admin' ? 'bwssb_manager' : authResult.user.role;
-    
-    // Login successful
-    onLogin({
-      email: authResult.user.email,
-      role: appRole as 'citizen' | 'bwssb_manager' | 'driver' | 'guest',
-      sessionToken: authResult.sessionToken!,
-      userData: authResult.user,
-    });
+      // Login Logic
+      let authResult: { success: boolean; user: DBUser | null; error?: string; sessionToken?: string | null } = { success: false, user: null };
+      
+      let q;
+      switch (role) {
+        case 'bwssb_manager':
+          q = query(usersRef, where('role', '==', 'admin'), where('id', '==', identifier), where('accessToken', '==', password));
+          break;
+        case 'citizen':
+          q = query(usersRef, where('role', '==', 'citizen'), where('rrNumber', '==', identifier), where('password', '==', password));
+          break;
+        case 'driver':
+          q = query(usersRef, where('role', '==', 'driver'), where('id', '==', identifier), where('password', '==', password));
+          break;
+        case 'guest':
+          authResult = { 
+            success: true, 
+            user: { id: 'GUEST-'+Date.now(), name: name || 'Guest User', email: `guest-${Date.now()}@example.com`, role: 'citizen', phone: phone, isActive: true } as any, 
+            sessionToken: 'guest-token-' + Date.now() 
+          };
+          break;
+      }
+
+      if (role !== 'guest' && q) {
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+          const userData = querySnapshot.docs[0].data() as DBUser;
+          authResult = { 
+            success: true, 
+            user: userData, 
+            sessionToken: 'session-' + Date.now() 
+          };
+        } else {
+          authResult = { success: false, user: null, error: 'Invalid credentials' };
+        }
+      }
+
+      if (!authResult.success || !authResult.user) {
+        setError(authResult.error || 'Authentication failed');
+        setIsLoading(false);
+        return;
+      }
+
+      if (role === 'guest') {
+        setOtpSent(true);
+        setTimeout(() => {
+          onLogin({
+            email: authResult.user!.email,
+            role: 'guest',
+            sessionToken: authResult.sessionToken!,
+            userData: authResult.user!,
+          });
+        }, 2000);
+        return;
+      }
+
+      const appRole = authResult.user.role === 'admin' ? 'bwssb_manager' : authResult.user.role;
+      onLogin({
+        email: authResult.user.email,
+        role: appRole as 'citizen' | 'bwssb_manager' | 'driver' | 'guest',
+        sessionToken: authResult.sessionToken!,
+        userData: authResult.user,
+      });
+
+    } catch (err) {
+      console.error("Auth error:", err);
+      setError('Database connection error');
+    } finally {
+      setIsLoading(false);
+      setAuthStep(0);
+    }
   };
 
-  const authSteps = role === 'guest'
-    ? ['VALIDATING EMAIL...', 'GENERATING OTP...', 'SENDING VERIFICATION LINK...', 'CHECK YOUR INBOX']
-    : ['VALIDATING CREDENTIALS...', 'QUERYING DATABASE...', 'VERIFYING ACCESS LEVEL...', 'ACCESS GRANTED'];
+  const authSteps = isSignUp 
+    ? ['PREPARING SECURE CHANNEL...', 'ENCRYPTING CREDENTIALS...', 'CREATING PROFILE...', 'WELCOME TO AQUASPHERE']
+    : role === 'guest'
+      ? ['VALIDATING EMAIL...', 'GENERATING OTP...', 'SENDING VERIFICATION LINK...', 'CHECK YOUR INBOX']
+      : ['VALIDATING CREDENTIALS...', 'QUERYING DATABASE...', 'VERIFYING ACCESS LEVEL...', 'ACCESS GRANTED'];
 
   const getColorClass = (colorName: string, type: 'text' | 'bg' | 'border') => {
     const colors: Record<string, Record<string, string>> = {
@@ -212,6 +301,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   };
 
   const fillDemoCredentials = (demoRole: 'admin' | 'citizen' | 'driver' | 'guest') => {
+    setIsSignUp(false);
     switch (demoRole) {
       case 'admin':
         setRole('bwssb_manager');
@@ -270,7 +360,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             <div className="flex items-center gap-2">
               <Shield size={14} className="text-cyan" />
               <span className="text-[10px] font-mono uppercase tracking-wider text-text-primary">
-                Secure Authentication Portal
+                {isSignUp ? 'New User Registration' : 'Secure Authentication Portal'}
               </span>
             </div>
             <div className="flex items-center gap-1">
@@ -419,32 +509,116 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                   <div className="flex items-start gap-2">
                     <Info size={12} className={`${getColorClass(currentConfig.color, 'text')} shrink-0 mt-0.5`} />
                     <p className="text-[9px] font-mono text-text-secondary leading-relaxed">
-                      {currentConfig.instruction}
+                      {isSignUp ? `Fill in the details below to create your ${currentConfig.label} account.` : currentConfig.instruction}
                     </p>
                   </div>
                 </motion.div>
 
-                {/* Identifier field */}
-                <div>
-                  <label className="text-[9px] font-mono uppercase tracking-[0.15em] text-text-dim block mb-1.5">
-                    {currentConfig.fieldLabel}
-                  </label>
-                  <div className="relative">
-                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim">
-                      {currentConfig.fieldIcon}
+                {/* Name field (Sign Up or Guest) */}
+                {(isSignUp || role === 'guest') && (
+                  <div>
+                    <label className="text-[9px] font-mono uppercase tracking-[0.15em] text-text-dim block mb-1.5">
+                      Full Name
+                    </label>
+                    <div className="relative">
+                      <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim" />
+                      <input
+                        type="text"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        className="w-full bg-bg-primary border border-border-dim rounded pl-10 pr-3 py-2.5 font-mono text-sm text-text-primary focus:border-cyan/40 focus:outline-none transition-colors placeholder:text-text-dim"
+                        placeholder="e.g., Alex Johnson"
+                        required
+                      />
                     </div>
-                    <input
-                      type={role === 'guest' ? 'email' : 'text'}
-                      value={identifier}
-                      onChange={(e) => setIdentifier(e.target.value)}
-                      className={`w-full bg-bg-primary border border-border-dim rounded pl-10 pr-3 py-2.5 font-mono text-sm text-text-primary focus:border-cyan/40 focus:outline-none transition-colors placeholder:text-text-dim`}
-                      placeholder={currentConfig.fieldPlaceholder}
-                    />
                   </div>
-                </div>
+                )}
+
+                {/* Identifier field (Login only, non-guest) */}
+                {!isSignUp && role !== 'guest' && (
+                  <div>
+                    <label className="text-[9px] font-mono uppercase tracking-[0.15em] text-text-dim block mb-1.5">
+                      {currentConfig.fieldLabel}
+                    </label>
+                    <div className="relative">
+                      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim">
+                        {currentConfig.fieldIcon}
+                      </div>
+                      <input
+                        type={role === 'guest' ? 'email' : 'text'}
+                        value={identifier}
+                        onChange={(e) => setIdentifier(e.target.value)}
+                        className={`w-full bg-bg-primary border border-border-dim rounded pl-10 pr-3 py-2.5 font-mono text-sm text-text-primary focus:border-cyan/40 focus:outline-none transition-colors placeholder:text-text-dim`}
+                        placeholder={currentConfig.fieldPlaceholder}
+                        required
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Phone field (Sign Up or Guest) */}
+                {(isSignUp || role === 'guest') && (
+                  <div>
+                    <label className="text-[9px] font-mono uppercase tracking-[0.15em] text-text-dim block mb-1.5">
+                      Phone Number
+                    </label>
+                    <div className="relative">
+                      <Radio size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim" />
+                      <input
+                        type="tel"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        className="w-full bg-bg-primary border border-border-dim rounded pl-10 pr-3 py-2.5 font-mono text-sm text-text-primary focus:border-cyan/40 focus:outline-none transition-colors placeholder:text-text-dim"
+                        placeholder="e.g., +91 98765 43210"
+                        required
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Ward and Address (Sign Up Citizen only) */}
+                {isSignUp && role === 'citizen' && (
+                  <>
+                    <div>
+                      <label className="text-[9px] font-mono uppercase tracking-[0.15em] text-text-dim block mb-1.5">
+                        Ward / Neighborhood
+                      </label>
+                      <div className="relative">
+                        <MapPin size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim" />
+                        <select
+                          value={ward}
+                          onChange={(e) => setWard(e.target.value)}
+                          className="w-full bg-bg-primary border border-border-dim rounded pl-10 pr-3 py-2.5 font-mono text-sm text-text-primary focus:border-cyan/40 focus:outline-none transition-colors"
+                        >
+                          <option value="HSR Layout">HSR Layout</option>
+                          <option value="Koramangala">Koramangala</option>
+                          <option value="Indiranagar">Indiranagar</option>
+                          <option value="Whitefield">Whitefield</option>
+                          <option value="Jayanagar">Jayanagar</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-mono uppercase tracking-[0.15em] text-text-dim block mb-1.5">
+                        Installation Address
+                      </label>
+                      <div className="relative">
+                        <IdCard size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim" />
+                        <input
+                          type="text"
+                          value={address}
+                          onChange={(e) => setAddress(e.target.value)}
+                          className="w-full bg-bg-primary border border-border-dim rounded pl-10 pr-3 py-2.5 font-mono text-sm text-text-primary focus:border-cyan/40 focus:outline-none transition-colors placeholder:text-text-dim"
+                          placeholder="House No, Street, Landmark"
+                          required
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {/* Password field - only for non-guest */}
-                {currentConfig.showPassword && (
+                {currentConfig.showPassword && role !== 'guest' && (
                   <div>
                     <label className="text-[9px] font-mono uppercase tracking-[0.15em] text-text-dim block mb-1.5">
                       {currentConfig.passwordLabel}
@@ -457,6 +631,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                         onChange={(e) => setPassword(e.target.value)}
                         className="w-full bg-bg-primary border border-border-dim rounded pl-10 pr-10 py-2.5 font-mono text-sm text-text-primary focus:border-cyan/40 focus:outline-none transition-colors placeholder:text-text-dim"
                         placeholder="••••••••"
+                        required
                       />
                       <button
                         type="button"
@@ -521,8 +696,6 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                   type="submit"
                   disabled={isLoading}
                   className={`w-full py-3 rounded border ${getColorClass(currentConfig.color, 'border')}/40 ${getColorClass(currentConfig.color, 'bg')}/15 ${getColorClass(currentConfig.color, 'text')} font-mono font-bold text-sm uppercase tracking-wider hover:brightness-125 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2`}
-                  style={{}}
-
                 >
                   {isLoading ? (
                     <>
@@ -532,20 +705,36 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                       >
                         <Radio size={16} />
                       </motion.div>
-                      {role === 'guest' ? 'Sending Link...' : 'Authenticating...'}
+                      {isSignUp ? 'Registering...' : role === 'guest' ? 'Sending Link...' : 'Authenticating...'}
                     </>
                   ) : (
                     <>
-                      {currentConfig.icon}
-                      {role === 'guest' ? 'Send Verification Link' : `Authenticate as ${currentConfig.label}`}
+                      {isSignUp ? <Users size={16} /> : currentConfig.icon}
+                      {isSignUp ? `Register as ${currentConfig.label}` : role === 'guest' ? 'Enter as Guest' : `Authenticate as ${currentConfig.label}`}
                     </>
                   )}
                 </motion.button>
+
+                {/* Sign Up Toggle */}
+                <div className="text-center mt-2">
+                  {role !== 'bwssb_manager' && role !== 'guest' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsSignUp(!isSignUp);
+                        setError('');
+                      }}
+                      className="text-[10px] font-mono text-cyan hover:text-sky-400 transition-colors"
+                    >
+                      {isSignUp ? 'Already have an account? Login' : "Don't have an account? Sign Up"}
+                    </button>
+                  )}
+                </div>
               </>
             )}
 
             {/* Demo credentials */}
-            {!otpSent && (
+            {!otpSent && !isSignUp && (
               <div className="border-t border-border-dim pt-4 mt-4">
                 <p className="text-[8px] font-mono text-text-dim uppercase tracking-wider text-center mb-2">
                   Quick Demo Access (from users.ts database)

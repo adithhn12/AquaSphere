@@ -1,6 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Settings, Droplets, Truck, Bell, Shield, Save, RotateCcw } from 'lucide-react';
+import { Settings, Droplets, Truck, Bell, Shield, Save, RotateCcw, Database } from 'lucide-react';
+import { seedDatabase } from '../utils/seedDatabase';
+import { db } from '../firebase';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 
 interface ConfigItem {
   id: string;
@@ -21,27 +24,58 @@ const initialConfig: ConfigItem[] = [
   { id: 'auto_dispatch', label: 'Auto-Dispatch', description: 'Automatically assign nearest tanker to critical requests', type: 'toggle', value: true },
   { id: 'sos_broadcast', label: 'SOS Broadcast', description: 'Enable driver emergency broadcast system', type: 'toggle', value: true },
   { id: 'leak_notifications', label: 'Leak Notifications', description: 'Send alerts to admin when leaks are reported', type: 'toggle', value: true },
-  { id: 'forecast_model', label: 'Forecast Model', description: 'AI model used for shortage predictions', type: 'select', value: 'Prophet v2.1', options: ['Prophet v2.1', 'Prophet v3.0-beta', 'ARIMA', 'LSTM'] },
-  { id: 'routing_algo', label: 'Routing Algorithm', description: 'Algorithm for tanker route optimization', type: 'select', value: 'Dijkstra + A*', options: ['Dijkstra + A*', 'Bellman-Ford', 'Floyd-Warshall', 'Greedy TSP'] },
 ];
 
 export default function AdminSettingsPanel() {
   const [config, setConfig] = useState(initialConfig);
   const [saved, setSaved] = useState(false);
+  const [seeding, setSeeding] = useState(false);
+  const [seeded, setSeeded] = useState(false);
 
   const updateValue = (id: string, newValue: number | boolean | string) => {
     setConfig(prev => prev.map(c => c.id === id ? { ...c, value: newValue } : c));
     setSaved(false);
   };
 
-  const handleSave = () => {
+  useEffect(() => {
+    // Load existing config from Firestore
+    const unsub = onSnapshot(doc(db, 'metadata', 'config'), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setConfig(prev => prev.map(item => ({
+          ...item,
+          value: data[item.id] !== undefined ? data[item.id] : item.value
+        })));
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const handleSave = async () => {
     setSaved(true);
+    try {
+      const configObj = config.reduce((acc, curr) => ({ ...acc, [curr.id]: curr.value }), {});
+      await setDoc(doc(db, 'metadata', 'config'), configObj);
+    } catch (err) {
+      console.error("Error saving settings:", err);
+    }
     setTimeout(() => setSaved(false), 2000);
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     setConfig(initialConfig);
     setSaved(false);
+    // Also reset in DB
+    const configObj = initialConfig.reduce((acc, curr) => ({ ...acc, [curr.id]: curr.value }), {});
+    await setDoc(doc(db, 'metadata', 'config'), configObj);
+  };
+
+  const handleSeed = async () => {
+    setSeeding(true);
+    await seedDatabase();
+    setSeeding(false);
+    setSeeded(true);
+    setTimeout(() => setSeeded(false), 3000);
   };
 
   // Group config items
@@ -138,8 +172,25 @@ export default function AdminSettingsPanel() {
           {toggleItems.map(item => <Row key={item.id} item={item} />)}
         </Section>
 
-        <Section title="AI & Routing" icon={<Truck size={16} className="text-[#0EA5E9]" />}>
-          {selectItems.map(item => <Row key={item.id} item={item} />)}
+        <Section title="Database Operations" icon={<Database size={16} className="text-[#6366F1]" />}>
+          <div className="flex flex-col gap-3">
+            <p className="text-[11px] text-[#94A3B8]">
+              Initialize the Firestore database with default mock data for wards, tankers, incidents, and users. 
+              <span className="text-amber-500 font-semibold block mt-1">Warning: This will overwrite existing records with the same IDs.</span>
+            </p>
+            <button 
+              onClick={handleSeed}
+              disabled={seeding}
+              className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+                seeded ? 'bg-emerald-50 border border-emerald-200 text-[#10B981]' : 
+                seeding ? 'bg-indigo-50 text-indigo-400 cursor-wait' :
+                'bg-indigo-500 text-white hover:bg-indigo-600'
+              }`}
+            >
+              <Database size={14} className={seeding ? 'animate-spin' : ''} />
+              {seeded ? 'Database Initialized ✓' : seeding ? 'Seeding Data...' : 'Seed Mock Data'}
+            </button>
+          </div>
         </Section>
       </div>
     </div>

@@ -3,14 +3,24 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, Filter, Route, Truck, Radio, Sun, Moon, Maximize2, ChevronDown } from 'lucide-react';
 import { MapContainer, TileLayer, CircleMarker, Polyline, Popup, useMap, Tooltip, Marker } from 'react-leaflet';
 import L from 'leaflet';
-import { wards, tankers } from '../data/mockData';
+import { useFirestore } from '../hooks/useFirestore';
+import type { Ward, Tanker } from '../data/mockData';
 import type { WaterRequest } from '../data/requests';
 import { densifyPath, type Coordinate } from '../utils/tsp';
 import MapZoomControls from './MapZoomControls';
+import { db } from '../firebase';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import 'leaflet/dist/leaflet.css';
+
+interface MapTanker extends Tanker {
+  targetLat?: number;
+  targetLng?: number;
+  destination?: string;
+}
 
 interface MapPanelProps {
   pendingRequests?: WaterRequest[];
+  isDarkMode: boolean;
 }
 
 // ── Bengaluru BBMP bounds ──────────────────────────────
@@ -31,54 +41,72 @@ const STATIC_LEAKS: readonly { lat: number; lng: number; ward: string; desc: str
 ] as const;
 
 // ══════════════════════════════════════════════════════════
-// Detailed Bengaluru tanker corridor route
-// Majestic → MG Road → Indiranagar → Koramangala → HSR
-// → Outer Ring Road → Bellandur → Whitefield
-// 19 closely spaced points for realistic road-following visuals
+// Smart Supply Corridor (Fallback)
 // ══════════════════════════════════════════════════════════
-const TANKER_ROUTE: Coordinate[] = [
-  [12.9779, 77.5727], // Majestic / Central Bengaluru
-  [12.9758, 77.5806], // Cubbon Park edge
-  [12.9736, 77.5881], // Brigade Road approach
-  [12.9718, 77.5940], // MG Road core
-  [12.9728, 77.6023], // Trinity Circle stretch
-  [12.9738, 77.6112], // Ulsoor / Old Madras Rd connector
-  [12.9756, 77.6218], // 100 Feet Road western Indiranagar edge
-  [12.9779, 77.6326], // 100 Feet Road, Indiranagar core
-  [12.9787, 77.6395], // CMH / 80 Feet Road turn
-  [12.9726, 77.6408], // Domlur flyover corridor
-  [12.9649, 77.6394], // EGL / Intermediate Ring Rd
-  [12.9568, 77.6369], // Koramangala 80 Feet Road
-  [12.9488, 77.6380], // Koramangala–HSR connector
-  [12.9389, 77.6401], // HSR Layout north edge
-  [12.9311, 77.6462], // ORR merge near Agara
-  [12.9258, 77.6599], // Bellandur ORR west
-  [12.9237, 77.6758], // Bellandur ORR center
-  [12.9310, 77.7035], // Marathahalli / ORR eastbound
-  [12.9698, 77.7500], // Whitefield / ITPL corridor
+const CORRIDOR_ROUTE: Coordinate[] = [
+  [12.9779, 77.5727], [12.9718, 77.5940], [12.9779, 77.6326], 
+  [12.9568, 77.6369], [12.9311, 77.6462], [12.9698, 77.7500], 
 ];
+
+/**
+ * Generates a simple multi-point route for animation between two coordinates
+ */
+function generateLiveRoute(start: Coordinate, end: Coordinate, algo: string): Coordinate[] {
+  // Vary the route geometry to make the algorithms look distinct
+  if (algo === 'Greedy TSP') {
+    return [start, end]; // Efficiency: Direct straight line
+  }
+  
+  if (algo === 'Bellman-Ford') {
+    // Traffic Mode: Curved path simulating avoidance of congestion
+    const mid: Coordinate = [
+      (start[0] + end[0]) / 2 + 0.015,
+      (start[1] + end[1]) / 2 - 0.01
+    ];
+    return [start, mid, end];
+  }
+  
+  // Floyd-Warshall / Dijkstra: High-fidelity multi-segment path
+  const mid1: Coordinate = [
+    start[0] + (end[0] - start[0]) * 0.4 + 0.008,
+    start[1] + (end[1] - start[1]) * 0.6 - 0.008
+  ];
+  const mid2: Coordinate = [
+    start[0] + (end[0] - start[0]) * 0.7 - 0.005,
+    start[1] + (end[1] - start[1]) * 0.3 + 0.005
+  ];
+  return [start, mid1, mid2, end];
+}
 
 const ANIM_INTERVAL = 2400; // step interval for marker snapping
 const CSS_TRANSITION = 2.2; // near-match for smooth glide
 
-function createTankerIcon() {
+function createTankerIcon(status: string) {
+  const color = status === 'in-transit' ? '#0EA5E9' : status === 'delivering' ? '#10B981' : '#F59E0B';
   return L.divIcon({
-    html: `<div style="
-      width:34px;
-      height:34px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      font-size:28px;
-      line-height:1;
-      text-align:center;
-      filter:drop-shadow(0 2px 5px rgba(0,0,0,0.20));
-      transition:transform ${CSS_TRANSITION}s linear;
-    ">🚚</div>`,
+    html: `<div class="relative flex items-center justify-center">
+      <div class="absolute w-10 h-10 rounded-full ${status === 'in-transit' ? 'bg-sky-400/20' : 'bg-emerald-400/20'} animate-ping"></div>
+      <div style="
+        width: 38px;
+        height: 38px;
+        background: white;
+        border: 2px solid ${color};
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 50;
+        transition: transform ${CSS_TRANSITION}s linear;
+      ">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-5l-4-4h-3v10h1"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
+      </div>
+    </div>`,
     className: '',
-    iconSize: [34, 34],
-    iconAnchor: [17, 34],
-    popupAnchor: [0, -30],
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
+    popupAnchor: [0, -20],
   });
 }
 
@@ -140,13 +168,13 @@ function AnimatedTankerMarker({
   onFly,
   motionPath,
 }: {
-  tanker: typeof tankers[0];
+  tanker: Tanker;
   onFly: (pos: [number, number]) => void;
   motionPath: Coordinate[];
 }) {
   const stepRef = useRef(0);
   const [pos, setPos] = useState<[number, number]>(motionPath[0] || [tanker.lat, tanker.lng]);
-  const icon = useMemo(() => createTankerIcon(), []);
+  const icon = useMemo(() => createTankerIcon(tanker.status), [tanker.status]);
 
   useEffect(() => {
     if (!motionPath.length) return;
@@ -167,8 +195,15 @@ function AnimatedTankerMarker({
 
   return (
     <Marker position={pos} icon={icon} eventHandlers={{ click: () => onFly(pos) }}>
+      {tanker.status === 'in-transit' && (
+        <Tooltip permanent direction="bottom" offset={[0, 20]} className="tanker-mission-label bg-transparent border-none shadow-none">
+          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-bg-card/90 border border-sky-500/30 font-bold text-[9px] uppercase tracking-tighter text-sky-400 shadow-sm">
+            <Radio size={8} className="animate-pulse" /> {tanker.id}
+          </div>
+        </Tooltip>
+      )}
       <Popup>
-        <div style={{ fontFamily: 'Inter, sans-serif', fontSize: 13, lineHeight: 1.7, color: '#1E293B' }}>
+        <div style={{ fontFamily: 'Inter, sans-serif', fontSize: 13, lineHeight: 1.7, color: 'var(--color-text-primary)' }}>
           <div style={{ fontWeight: 700, marginBottom: 4, color, fontSize: 14 }}>🚚 {tanker.id}</div>
           <div>Plate: <b style={{ color }}>{tanker.plate}</b></div>
           <div>Status: <b style={{ color }}>{tanker.status.toUpperCase()}</b></div>
@@ -180,7 +215,7 @@ function AnimatedTankerMarker({
   );
 }
 
-function areaToCoordinate(area: string): Coordinate | null {
+function areaToCoordinate(area: string, wards: Ward[]): Coordinate | null {
   const lower = area.toLowerCase();
   const ward = wards.find(w =>
     lower.includes(w.name.toLowerCase()) ||
@@ -190,10 +225,37 @@ function areaToCoordinate(area: string): Coordinate | null {
   return [ward.lat, ward.lng];
 }
 
-export default function MapPanel({ pendingRequests = [] }: MapPanelProps) {
-  const [mapMode, setMapMode] = useState<'light' | 'dark'>('light');
+export default function MapPanel({ pendingRequests = [], isDarkMode }: MapPanelProps) {
+  const { data: dbWards } = useFirestore<Ward>('wards');
+  const { data: dbTankers } = useFirestore<Tanker>('tankers');
+  
+  // ── FALLBACK LOGIC ──
+  const wards = dbWards.length > 0 ? dbWards : [
+    { id: 'W118', name: 'Varthur', lat: 12.9437, lng: 77.7400, status: 'critical', reservoir: 18, demand: 89, supply: 42, population: 156000 },
+    { id: 'W174', name: 'HSR Layout', lat: 12.9116, lng: 77.6389, status: 'critical', reservoir: 31, demand: 78, supply: 41, population: 142000 },
+    { id: 'W150', name: 'Bellandur', lat: 12.9256, lng: 77.6760, status: 'critical', reservoir: 22, demand: 85, supply: 38, population: 148000 },
+    { id: 'W142', name: 'Indiranagar', lat: 12.9784, lng: 77.6408, status: 'risk', reservoir: 42, demand: 71, supply: 52, population: 134000 },
+  ] as Ward[];
+
+  const tankers = dbTankers.length > 0 ? dbTankers : [
+    { id: 'TNK-PRIMARY', plate: 'KA-01-AQUA-01', status: 'in-transit', driver: 'System Pilot', lat: 12.9716, lng: 77.5946, capacity: 10000, filled: 8500 } as Tanker
+  ];
+
+  const displayedTankers = tankers;
+  
+  const mapMode = isDarkMode ? 'dark' : 'light';
   const [toolbarOpen, setToolbarOpen] = useState(false);
   const [flyTarget, setFlyTarget] = useState<[number, number] | null>(null);
+  const [routingAlgo, setRoutingAlgo] = useState('Dijkstra + A*');
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'metadata', 'config'), (snapshot) => {
+      if (snapshot.exists()) {
+        setRoutingAlgo(snapshot.data().routing_algo || 'Dijkstra + A*');
+      }
+    });
+    return () => unsub();
+  }, []);
 
   const isLight = mapMode === 'light';
   const leakIcon = useMemo(() => createLeakIcon(), []);
@@ -214,38 +276,38 @@ export default function MapPanel({ pendingRequests = [] }: MapPanelProps) {
 
   const activeRequestCoords = useMemo(() => {
     return pendingRequests
-      .map(req => areaToCoordinate(req.area))
+      .map(req => areaToCoordinate(req.area, wards))
       .filter((coord): coord is Coordinate => Boolean(coord));
-  }, [pendingRequests]);
+  }, [pendingRequests, wards]);
 
-  // Densified path for smooth tanker movement along the detailed corridor
-  const denseMotionPath = useMemo(() => densifyPath(TANKER_ROUTE, 8), []);
+  // ── DYNAMIC ROUTE LOGIC ──
+  const activeRoute = useMemo(() => {
+    if (activeRequestCoords.length > 0) {
+      return generateLiveRoute(BENGALURU_CENTER, activeRequestCoords[0], routingAlgo);
+    }
+    return CORRIDOR_ROUTE;
+  }, [activeRequestCoords, routingAlgo]);
+
+  const denseMotionPath = useMemo(() => densifyPath(activeRoute, 8), [activeRoute]);
 
   return (
-    <div className="h-full flex flex-col relative bg-[#F1F5F9]">
-      <div className="px-3 md:px-4 py-2 md:py-2.5 border-b border-[#E2E8F0] bg-white flex items-center justify-between z-10 relative">
+    <div className="h-full flex flex-col relative bg-bg-primary">
+      <div className="px-3 md:px-4 py-2 md:py-2.5 border-b border-border-dim bg-bg-secondary flex items-center justify-between z-10 relative">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-neon animate-pulse" />
-          <span className="text-sm font-semibold text-[#1E293B]">Live Map</span>
-          <span className="text-xs text-[#94A3B8] hidden sm:inline">
-            · {wards.length} wards · {pendingRequests.length} pending · corridor route active
+          <span className="text-sm font-semibold text-text-primary">Live Ops Command</span>
+          <span className="text-xs text-text-dim hidden sm:inline">
+            · {wards.length} wards · {pendingRequests.length} pending · {activeRequestCoords.length > 0 ? 'Live Dispatch Active' : 'Corridor patrol'}
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex rounded-lg p-0.5 border bg-[#F1F5F9] border-[#E2E8F0]">
-            <button onClick={() => setMapMode('light')}
-              className={`p-1.5 rounded-md transition-all ${mapMode === 'light' ? 'bg-white text-amber-500 shadow-sm border border-[#E2E8F0]' : 'text-[#94A3B8]'}`}
-              title="Day Mode"><Sun size={13} /></button>
-            <button onClick={() => setMapMode('dark')}
-              className={`p-1.5 rounded-md transition-all ${mapMode === 'dark' ? 'bg-white text-indigo-500 shadow-sm border border-[#E2E8F0]' : 'text-[#94A3B8]'}`}
-              title="Night Mode"><Moon size={13} /></button>
-          </div>
           <Radio size={12} className="text-neon animate-pulse-glow" />
         </div>
       </div>
 
       <div className="flex-1 relative overflow-hidden min-h-0">
         <MapContainer
+          key={mapMode}
           center={BENGALURU_CENTER}
           zoom={DEFAULT_ZOOM}
           className={`h-full w-full ${mapMode === 'light' ? 'light-map' : 'dark-map'}`}
@@ -256,6 +318,21 @@ export default function MapPanel({ pendingRequests = [] }: MapPanelProps) {
         >
           <MapController mapMode={mapMode} flyTarget={flyTarget} />
           <TileLayer key={mapMode} url={TILE_LAYERS[mapMode].url} />
+
+          {/* ── HEATMAP LAYER ── */}
+          {wards.filter(w => w.status === 'critical' || w.status === 'risk').map(ward => (
+            <Marker
+              key={`heatmap-${ward.id}`}
+              position={[ward.lat, ward.lng]}
+              icon={L.divIcon({
+                html: `<div class="heatmap-pulse ${ward.status === 'critical' ? 'critical' : 'risk'}"></div>`,
+                className: '',
+                iconSize: [60, 60],
+                iconAnchor: [30, 30]
+              })}
+              interactive={false}
+            />
+          ))}
 
           {/* City boundary */}
           <Polyline
@@ -281,7 +358,7 @@ export default function MapPanel({ pendingRequests = [] }: MapPanelProps) {
                   </span>
                 </Tooltip>
                 <Popup>
-                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: 13, lineHeight: 1.7, color: '#1E293B' }}>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: 13, lineHeight: 1.7, color: 'var(--color-text-primary)' }}>
                     <div style={{ fontWeight: 700, color, fontSize: 14, marginBottom: 4 }}>{ward.id} {ward.name}</div>
                     <div>Reservoir: <b style={{ color: ward.reservoir < 30 ? '#DC2626' : ward.reservoir < 50 ? '#D97706' : '#059669' }}>{ward.reservoir}%</b></div>
                     <div>Demand / Supply: <b>{ward.demand}</b> / <b>{ward.supply}</b> MLD</div>
@@ -291,32 +368,51 @@ export default function MapPanel({ pendingRequests = [] }: MapPanelProps) {
             );
           })}
 
-          {/* Detailed multi-way route trail — vivid neon in dark mode */}
+          {/* Dynamic route trail */}
           <Polyline
-            positions={TANKER_ROUTE}
-            pathOptions={{ color: isLight ? '#0EA5E9' : '#38BDF8', weight: isLight ? 4 : 4.5, opacity: isLight ? 0.92 : 1 }}
+            positions={activeRoute}
+            pathOptions={{ 
+              color: routingAlgo === 'Greedy TSP' ? '#F59E0B' : 
+                     routingAlgo === 'Bellman-Ford' ? '#EC4899' :
+                     routingAlgo === 'Floyd-Warshall' ? '#8B5CF6' :
+                     isLight ? '#0EA5E9' : '#38BDF8', 
+              weight: routingAlgo === 'Bellman-Ford' ? 6 : 4, 
+              opacity: 0.8,
+              dashArray: routingAlgo === 'Greedy TSP' ? '1, 12' : 
+                         routingAlgo === 'Bellman-Ford' ? '10, 10' : 
+                         activeRequestCoords.length > 0 ? '1, 10' : undefined
+            }}
           />
 
-          {/* Pending request delivery points snapped to ward coordinates */}
-          {activeRequestCoords.map((coord, idx) => (
-            <CircleMarker
-              key={`stop-${idx}`}
-              center={coord}
-              radius={5}
-              pathOptions={{ color: '#0EA5E9', fillColor: '#0EA5E9', fillOpacity: 0.55, weight: 2 }}
-              eventHandlers={{ click: () => handleFly(coord) }}
-            >
-              <Popup>
-                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: 13, color: '#1E293B' }}>
-                  <div style={{ fontWeight: 700, color: '#0EA5E9' }}>Delivery Stop #{idx + 1}</div>
-                  <div>Active citizen request waypoint</div>
-                </div>
-              </Popup>
-            </CircleMarker>
-          ))}
+          {/* Dynamic route trails for assigned tankers */}
+          {tankers.map((tanker: any) => {
+            if (tanker.targetLat && tanker.targetLng) {
+              return (
+                <Polyline
+                  key={`path-${tanker.id}`}
+                  positions={[[tanker.lat, tanker.lng], [tanker.targetLat, tanker.targetLng]]}
+                  pathOptions={{ color: '#0EA5E9', weight: 3, opacity: 0.6, dashArray: '5, 10' }}
+                />
+              );
+            }
+            return null;
+          })}
 
-          {/* Animated tanker follows the detailed corridor path */}
-          <AnimatedTankerMarker tanker={tankers[0]} onFly={handleFly} motionPath={denseMotionPath} />
+          {/* Animated tankers with individual paths */}
+          {tankers.map((tanker: any) => {
+            const tankerPath = (tanker.targetLat && tanker.targetLng)
+              ? densifyPath([[tanker.lat, tanker.lng], [tanker.targetLat, tanker.targetLng]], 15)
+              : denseMotionPath;
+            
+            return (
+              <AnimatedTankerMarker 
+                key={tanker.id} 
+                tanker={tanker} 
+                onFly={handleFly} 
+                motionPath={tankerPath} 
+              />
+            );
+          })}
 
           {/* Static leak markers */}
           {STATIC_LEAKS.map((leak, i) => (
@@ -327,10 +423,10 @@ export default function MapPanel({ pendingRequests = [] }: MapPanelProps) {
               eventHandlers={{ click: () => handleFly([leak.lat, leak.lng]) }}
             >
               <Popup>
-                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: 13, lineHeight: 1.7, color: '#1E293B' }}>
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: 13, lineHeight: 1.7, color: 'var(--color-text-primary)' }}>
                   <div style={{ fontWeight: 700, color: '#0EA5E9', fontSize: 14, marginBottom: 4 }}>💧 Active Leak</div>
                   <div><b>{leak.ward}</b></div>
-                  <div style={{ color: '#64748B' }}>{leak.desc}</div>
+                  <div style={{ color: 'var(--color-text-secondary)' }}>{leak.desc}</div>
                 </div>
               </Popup>
             </Marker>
@@ -339,20 +435,14 @@ export default function MapPanel({ pendingRequests = [] }: MapPanelProps) {
           <MapZoomControls theme={mapMode} showResetView showLocateUser resetCenter={[12.9716, 77.5946]} resetZoom={12} minZoom={10} maxZoom={17} />
         </MapContainer>
 
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1000] px-3 py-1 rounded-lg text-[10px] md:text-[11px] font-medium bg-white/95 text-[#64748B] border border-[#E2E8F0] shadow-sm hidden sm:block">
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1000] px-3 py-1 rounded-lg text-[10px] md:text-[11px] font-medium bg-bg-secondary/95 text-text-secondary border border-border-dim shadow-sm hidden sm:block">
           <div className="flex items-center gap-1.5">
             <Maximize2 size={10} />
             Majestic → MG Road → Indiranagar → Koramangala → HSR → Bellandur → Whitefield
           </div>
         </div>
 
-        <div className={`absolute top-2 right-14 z-[1000] px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-[11px] font-medium shadow-sm ${
-          isLight ? 'bg-white border border-[#E2E8F0] text-amber-500' : 'bg-[#1E293B] border border-[#334155] text-cyan'
-        }`}>
-          {mapMode === 'light' ? <><Sun size={11} /> Day</> : <><Moon size={11} /> Night</>}
-        </div>
-
-        <div className="absolute bottom-[52px] left-3 z-[1000] rounded-xl px-3 py-2 bg-white/95 border border-[#E2E8F0] shadow-sm hidden sm:block">
+        <div className="absolute bottom-[52px] left-3 z-[1000] rounded-xl px-3 py-2 bg-bg-secondary/95 border border-border-dim shadow-sm hidden sm:block">
           <div className="flex items-center gap-3 text-[11px] leading-none">
             {[
               { c: '#059669', l: 'Stable' },
@@ -364,32 +454,32 @@ export default function MapPanel({ pendingRequests = [] }: MapPanelProps) {
                 <span style={{ color: c, fontWeight: 500 }}>{l}</span>
               </div>
             ))}
-            <div className="w-px h-3.5 bg-[#E2E8F0] mx-0.5" />
-            <div className="flex items-center gap-1.5">
+            <div className="w-px h-3.5 bg-border-dim mx-0.5" />
+            <div className="flex items-center gap-1.5 text-text-secondary">
               <span className="text-[18px] leading-none shrink-0">🚚</span>
-              <span className="text-[#64748B] font-medium">Tanker</span>
+              <span className="font-medium">Tanker</span>
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-[15px] leading-none shrink-0">💧</span>
-              <span className="text-[#0EA5E9] font-medium">Leak</span>
+              <span className="text-cyan font-medium">Leak</span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-[2px] bg-[#0EA5E9] rounded-full" />
-              <span className="text-[#64748B] font-medium">Route</span>
+            <div className="flex items-center gap-1.5 text-text-secondary">
+              <div className="w-3 h-[2px] bg-cyan rounded-full" />
+              <span className="font-medium">Route</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="border-t border-[#E2E8F0] bg-white z-10 relative">
+      <div className="border-t border-border-dim bg-bg-secondary z-10 relative">
         <button onClick={() => setToolbarOpen(!toolbarOpen)}
-          className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium text-[#94A3B8] hover:text-[#64748B] transition-colors">
+          className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium text-text-dim hover:text-text-secondary transition-colors">
           Tools
           <motion.div animate={{ rotate: toolbarOpen ? 180 : 0 }}><ChevronDown size={12} /></motion.div>
         </button>
         <AnimatePresence>
           {toolbarOpen && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden border-t border-[#E2E8F0]">
+            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden border-t border-border-dim">
               <div className="flex flex-wrap items-center justify-between px-3 md:px-4 py-2">
                 <div className="flex flex-wrap items-center gap-2">
                   {[
@@ -398,14 +488,14 @@ export default function MapPanel({ pendingRequests = [] }: MapPanelProps) {
                     { key: 'R', label: 'Route Path', icon: <Route size={11} /> },
                     { key: 'A', label: 'Allocate', icon: <Truck size={11} /> },
                   ].map(item => (
-                    <button key={item.key} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:border-cyan hover:bg-cyan/5 hover:text-cyan text-xs font-medium transition-all">
+                    <button key={item.key} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border-dim bg-bg-primary text-text-secondary hover:border-cyan hover:bg-cyan/5 hover:text-cyan text-xs font-medium transition-all">
                       {item.icon}
                       <span className="hidden md:inline">{item.label}</span>
                       <span className="font-mono text-[10px] text-cyan">[{item.key}]</span>
                     </button>
                   ))}
                 </div>
-                <span className="text-[10px] font-mono text-[#94A3B8] hidden lg:inline">
+                <span className="text-[10px] font-mono text-text-dim hidden lg:inline">
                   Detailed Corridor Path · 19 Waypoints · Solid Blue Polyline
                 </span>
               </div>

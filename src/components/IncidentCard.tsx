@@ -26,7 +26,7 @@ export default function IncidentCard({ incident, index }: IncidentCardProps) {
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.06, duration: 0.3 }}
-      className={`${c.border} border rounded-xl p-3.5 mb-2.5 last:mb-0 bg-white hover:bg-[#F8FAFC] transition-colors`}>
+      className={`${c.border} border rounded-xl p-3.5 mb-2.5 last:mb-0 bg-bg-card hover:bg-bg-primary transition-colors`}>
       <div className="flex items-start gap-3">
         <div className={`${c.icon} mt-0.5 shrink-0`}>{iconMap[incident.type]}</div>
         <div className="flex-1 min-w-0">

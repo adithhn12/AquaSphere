@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Shield, User, Radio, LogOut, Truck, Droplets, Menu, X, Globe, BarChart3, Users, Settings } from 'lucide-react';
+import { Shield, User, Radio, LogOut, Truck, Droplets, Menu, X, Globe, BarChart3, Users, Settings, Sun, Moon } from 'lucide-react';
 
 export type ActiveView = 'bwssb_manager' | 'citizen' | 'driver' | 'guest';
-export type AdminTab = 'dashboard' | 'reports' | 'users' | 'analytics' | 'settings';
+export type AdminTab = 'dashboard' | 'requests' | 'leaks' | 'users' | 'analytics' | 'settings';
 
 interface HeaderProps {
   view: ActiveView;
@@ -13,12 +13,15 @@ interface HeaderProps {
   /** Admin sub-navigation */
   adminTab?: AdminTab;
   onAdminTabChange?: (tab: AdminTab) => void;
+  isDarkMode: boolean;
+  onToggleDarkMode: () => void;
 }
 
 /* ── Admin sub-nav tabs ────────────────────────────── */
 const ADMIN_TABS: { id: AdminTab; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: 'BWSSB Dashboard', icon: <Shield size={14} /> },
-  { id: 'reports',   label: 'Reports',     icon: <BarChart3 size={14} /> },
+  { id: 'requests',  label: 'Requests',      icon: <Truck size={14} /> },
+  { id: 'leaks',     label: 'Leaks',         icon: <Droplets size={14} /> },
   { id: 'users',     label: 'Users',       icon: <Users size={14} /> },
   { id: 'analytics', label: 'Analytics',   icon: <BarChart3 size={14} /> },
   { id: 'settings',  label: 'Settings',    icon: <Settings size={14} /> },
@@ -44,7 +47,11 @@ const ROLE_ICON: Record<string, React.ReactNode> = {
   guest: <Globe size={13} />,
 };
 
-export default function Header({ view, onViewChange: _onViewChange, user, onLogout, adminTab = 'dashboard', onAdminTabChange }: HeaderProps) {
+export default function Header({ 
+  view, onViewChange, user, onLogout, 
+  adminTab = 'dashboard', onAdminTabChange,
+  isDarkMode, onToggleDarkMode
+}: HeaderProps) {
   const [time, setTime] = useState('');
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -61,22 +68,22 @@ export default function Header({ view, onViewChange: _onViewChange, user, onLogo
   const isAdmin = user?.role === 'bwssb_manager';
 
   return (
-    <header className="bg-white border-b border-[#E2E8F0] relative z-50">
+    <header className="bg-bg-secondary border-b border-border-dim relative z-50">
       {/* ── Main row ───────────────────────────────── */}
       <div className="h-14 flex items-center justify-between px-4 md:px-5">
         {/* Left: Logo */}
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-[#0EA5E9]/10 border border-[#0EA5E9]/20 flex items-center justify-center shrink-0">
-            <Droplets size={16} className="text-[#0EA5E9]" />
+          <div className="w-8 h-8 rounded-lg bg-cyan/10 border border-cyan/20 flex items-center justify-center shrink-0">
+            <Droplets size={16} className="text-cyan" />
           </div>
           <div className="hidden sm:block">
-            <span className="font-semibold text-sm tracking-wide text-[#1E293B] block leading-tight">AquaSphere AI</span>
-            <span className="text-[10px] text-[#94A3B8] font-medium">Bengaluru Water CMD</span>
+            <span className="font-semibold text-sm tracking-wide text-text-primary block leading-tight">AquaSphere AI</span>
+            <span className="text-[10px] text-text-dim font-medium">Bengaluru Water CMD</span>
           </div>
-          <span className="sm:hidden font-semibold text-sm text-[#1E293B]">AquaSphere</span>
-          <div className="hidden xl:flex items-center gap-2 ml-2 text-[11px] text-[#94A3B8] font-mono">
+          <span className="sm:hidden font-semibold text-sm text-text-primary">AquaSphere</span>
+          <div className="hidden xl:flex items-center gap-2 ml-2 text-[11px] text-text-dim font-mono">
             <span>12.97°N, 77.59°E</span>
-            <span className="text-[#E2E8F0]">|</span>
+            <span className="text-border-dim">|</span>
             <div className="flex items-center gap-1.5">
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <span className="text-emerald-500 font-medium">Online</span>
@@ -87,7 +94,6 @@ export default function Header({ view, onViewChange: _onViewChange, user, onLogo
         {/* Center: Admin sub-nav OR non-admin static badge */}
         <div className="hidden md:flex items-center">
           {isAdmin && view === 'bwssb_manager' ? (
-            /* ── ADMIN SUB-NAV: Dashboard | Reports | Users | Settings ── */
             <nav className="flex items-center gap-1">
               {ADMIN_TABS.map(tab => {
                 const active = adminTab === tab.id;
@@ -96,16 +102,15 @@ export default function Header({ view, onViewChange: _onViewChange, user, onLogo
                     key={tab.id}
                     onClick={() => onAdminTabChange?.(tab.id)}
                     className={`relative flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium transition-colors ${
-                      active ? 'text-[#0EA5E9]' : 'text-[#94A3B8] hover:text-[#64748B]'
+                      active ? 'text-cyan' : 'text-text-dim hover:text-text-secondary'
                     }`}
                   >
                     {tab.icon}
                     {tab.label}
-                    {/* Active bottom-border indicator */}
                     {active && (
                       <motion.div
                         layoutId="admin-tab-indicator"
-                        className="absolute bottom-0 left-2 right-2 h-[2px] bg-[#0EA5E9] rounded-full"
+                        className="absolute bottom-0 left-2 right-2 h-[2px] bg-cyan rounded-full"
                         transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                       />
                     )}
@@ -114,7 +119,6 @@ export default function Header({ view, onViewChange: _onViewChange, user, onLogo
               })}
             </nav>
           ) : (
-            /* ── NON-ADMIN or non-command view: static role badge ── */
             <div className={`flex items-center gap-2 px-4 py-1.5 rounded-xl border ${ROLE_BG[user?.role || 'guest']}`}>
               {ROLE_ICON[user?.role || 'guest']}
               <span className={`text-xs font-semibold ${ROLE_COLOR[user?.role || 'guest']}`}>
@@ -126,18 +130,25 @@ export default function Header({ view, onViewChange: _onViewChange, user, onLogo
 
         {/* Right: Clock + User + Burger */}
         <div className="flex items-center gap-3">
-          <div className="hidden md:flex items-center gap-1.5">
-            <Radio size={10} className="text-[#0EA5E9] animate-pulse-glow" />
-            <span className="font-mono text-xs text-[#0EA5E9] tabular-nums">{time}</span>
-            <span className="text-[10px] text-[#94A3B8]">IST</span>
+          <div className="hidden md:flex items-center gap-1.5 mr-2">
+            <Radio size={10} className="text-cyan animate-pulse-glow" />
+            <span className="font-mono text-xs text-cyan tabular-nums">{time}</span>
+            <span className="text-[10px] text-text-dim">IST</span>
           </div>
+
+          <button
+            onClick={onToggleDarkMode}
+            className={`p-2 rounded-lg transition-all ${isDarkMode ? 'bg-slate-800 text-amber-400 border border-slate-700' : 'bg-slate-50 text-slate-500 border border-slate-200'}`}
+          >
+            {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
+          </button>
 
           {user && onLogout && (
             <>
-              <div className="hidden md:block h-5 w-px bg-[#E2E8F0]" />
+              <div className="hidden md:block h-5 w-px bg-border-dim" />
               <div className="hidden md:flex items-center gap-3">
                 <div className="text-right">
-                  <span className="text-xs text-[#1E293B] block leading-tight font-medium">
+                  <span className="text-xs text-text-primary block leading-tight font-medium">
                     {user.email.length > 18 ? user.email.slice(0, 18) + '…' : user.email}
                   </span>
                   <span className={`text-[10px] font-medium ${ROLE_COLOR[user.role]}`}>
@@ -145,7 +156,7 @@ export default function Header({ view, onViewChange: _onViewChange, user, onLogo
                   </span>
                 </div>
                 <button onClick={onLogout}
-                  className="w-8 h-8 rounded-lg border border-[#E2E8F0] bg-white flex items-center justify-center text-[#94A3B8] hover:text-red-500 hover:border-red-200 transition-all"
+                  className="w-8 h-8 rounded-lg border border-border-dim bg-bg-secondary flex items-center justify-center text-text-dim hover:text-red-500 hover:border-red-200 transition-all"
                   title="Logout">
                   <LogOut size={14} />
                 </button>
@@ -155,7 +166,7 @@ export default function Header({ view, onViewChange: _onViewChange, user, onLogo
 
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
-            className="md:hidden w-8 h-8 rounded-lg border border-[#E2E8F0] bg-white flex items-center justify-center text-[#64748B]"
+            className="md:hidden w-8 h-8 rounded-lg border border-border-dim bg-bg-secondary flex items-center justify-center text-text-secondary"
           >
             {mobileOpen ? <X size={16} /> : <Menu size={16} />}
           </button>
@@ -169,19 +180,18 @@ export default function Header({ view, onViewChange: _onViewChange, user, onLogo
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="md:hidden overflow-hidden border-t border-[#E2E8F0] bg-white"
+            className="md:hidden overflow-hidden border-t border-border-dim bg-bg-secondary"
           >
             <div className="p-4 space-y-3">
-              {/* Admin sub-nav for mobile */}
               {isAdmin && view === 'bwssb_manager' && (
-                <div className="grid grid-cols-4 gap-1.5 rounded-xl bg-[#F1F5F9] p-1 border border-[#E2E8F0]">
+                <div className="grid grid-cols-4 gap-1.5 rounded-xl bg-bg-primary p-1 border border-border-dim">
                   {ADMIN_TABS.map(tab => (
                     <button key={tab.id}
                       onClick={() => { onAdminTabChange?.(tab.id); setMobileOpen(false); }}
                       className={`flex flex-col items-center gap-1 py-2.5 rounded-lg text-[10px] font-medium transition-all ${
                         adminTab === tab.id
-                          ? 'bg-white text-[#0EA5E9] shadow-sm border border-[#E2E8F0]'
-                          : 'text-[#94A3B8]'
+                          ? 'bg-bg-secondary text-cyan shadow-sm border border-border-dim'
+                          : 'text-text-dim'
                       }`}>
                       {tab.icon}
                       {tab.label}
@@ -190,9 +200,8 @@ export default function Header({ view, onViewChange: _onViewChange, user, onLogo
                 </div>
               )}
 
-              {/* Non-admin badge */}
               {!isAdmin && (
-                <div className={`flex items-center justify-center gap-2 py-2.5 rounded-xl border ${ROLE_BG[user?.role || 'guest']}`}>
+                <div className={`flex items-center justify-center gap-2 py-2.5 rounded-xl border ${ROLE_BG[user?.role || 'guest']} bg-bg-secondary`}>
                   {ROLE_ICON[user?.role || 'guest']}
                   <span className={`text-xs font-semibold ${ROLE_COLOR[user?.role || 'guest']}`}>
                     {(user?.role || 'Guest').charAt(0).toUpperCase() + (user?.role || 'guest').slice(1)} Mode
@@ -200,17 +209,16 @@ export default function Header({ view, onViewChange: _onViewChange, user, onLogo
                 </div>
               )}
 
-              {/* User row */}
               {user && (
-                <div className="flex items-center justify-between py-2 border-t border-[#E2E8F0]">
+                <div className="flex items-center justify-between py-2 border-t border-border-dim">
                   <div>
-                    <span className="text-sm text-[#1E293B] font-medium block">{user.email}</span>
+                    <span className="text-sm text-text-primary font-medium block">{user.email}</span>
                     <div className="flex items-center gap-2 mt-0.5">
                       <div className="flex items-center gap-1">
                         <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                         <span className="text-[11px] text-emerald-500 font-medium">Online</span>
                       </div>
-                      <span className="text-[11px] text-[#94A3B8] font-mono">{time} IST</span>
+                      <span className="text-[11px] text-text-dim font-mono">{time} IST</span>
                     </div>
                   </div>
                   {onLogout && (
